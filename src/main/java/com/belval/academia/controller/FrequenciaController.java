@@ -22,7 +22,7 @@ import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/frequencia")
-@CrossOrigin(origins = "http://localhost:5173")
+@CrossOrigin(origins = {"http://localhost:5173", "https://gerencia-gsdy7lqhm-paulowares-projects.vercel.app"})
 public class FrequenciaController {
 
     // Segredo que deriva o token diário do QR Code da academia (SHA-256).
