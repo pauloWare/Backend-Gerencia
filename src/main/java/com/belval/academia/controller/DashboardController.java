@@ -19,7 +19,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/dashboard")
-@CrossOrigin(origins = {"http://localhost:5173", "https://gerencia-gsdy7lqhm-paulowares-projects.vercel.app"})
+@CrossOrigin(origins = {"http://localhost:5173", "https://gerencia-sigma.vercel.app", "https://gerencia-gsdy7lqhm-paulowares-projects.vercel.app"})
 public class DashboardController {
 
     /** Limite (percentual) usado para sinalizar baixa frequência no mês corrente. */

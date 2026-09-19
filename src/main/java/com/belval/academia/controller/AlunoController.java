@@ -12,7 +12,7 @@ import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/aluno")
-@CrossOrigin(origins = {"http://localhost:5173", "https://gerencia-gsdy7lqhm-paulowares-projects.vercel.app"})
+@CrossOrigin(origins = {"http://localhost:5173", "https://gerencia-sigma.vercel.app", "https://gerencia-gsdy7lqhm-paulowares-projects.vercel.app"})
 public class AlunoController {
 
     @Autowired

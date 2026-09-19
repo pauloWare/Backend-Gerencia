@@ -11,7 +11,7 @@ public class WebConfig implements WebMvcConfigurer {
    @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**")
-                .allowedOriginPatterns("http://localhost:*", "https://gerencia-gsdy7lqhm-paulowares-projects.vercel.app") // Isso libera qualquer porta do localhost com segurança
+                .allowedOriginPatterns("http://localhost:*", "https://gerencia-sigma.vercel.app", "https://gerencia-gsdy7lqhm-paulowares-projects.vercel.app") // Isso libera qualquer porta do localhost com segurança
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .allowCredentials(true);

@@ -9,7 +9,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/funcionario")
-@CrossOrigin(origins = {"http://localhost:5173", "https://gerencia-gsdy7lqhm-paulowares-projects.vercel.app"})
+@CrossOrigin(origins = {"http://localhost:5173", "https://gerencia-sigma.vercel.app", "https://gerencia-gsdy7lqhm-paulowares-projects.vercel.app"})
 public class FuncionarioController {
 
     @Autowired
