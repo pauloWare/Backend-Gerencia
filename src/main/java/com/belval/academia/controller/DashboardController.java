@@ -1,6 +1,5 @@
 package com.belval.academia.controller;
 
-import com.belval.academia.model.Frequencia;
 import com.belval.academia.model.Mensalidade;
 import com.belval.academia.repository.AlunoRepository;
 import com.belval.academia.repository.MensalidadeRepository;
@@ -19,11 +18,8 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/dashboard")
-@CrossOrigin(origins = {"http://localhost:5173", "https://gerencia-sigma.vercel.app", "https://gerencia-gsdy7lqhm-paulowares-projects.vercel.app"})
+@CrossOrigin(origins = "http://localhost:5173")
 public class DashboardController {
-
-    /** Limite (percentual) usado para sinalizar baixa frequência no mês corrente. */
-    private static final double LIMITE_BAIXA_FREQUENCIA = 70.0;
 
     @Autowired private AlunoRepository alunoRepository;
     @Autowired private MensalidadeRepository mensalidadeRepository;
@@ -90,40 +86,15 @@ public class DashboardController {
                 .filter(p -> !"CONCLUIDA".equals(p.getStatusExibicao()))
                 .count();
         long manutencoesPendentes = chamadosPendentes + preventivasPendentes;
-        List<Frequencia> todasFrequencias = frequenciaRepository.findAll();
-        // Presenças de hoje contabilizando cada aluno UMA única vez
-        // (protege a métrica contra eventuais registros duplicados antigos)
-        long presencasHoje = todasFrequencias.stream()
-                .filter(f -> f.getData() != null && f.getData().equals(hoje) && f.getAluno() != null)
-                .map(f -> f.getAluno().getId())
-                .distinct()
+        long frequenciaDiaria = frequenciaRepository.findAll().stream()
+                .filter(f -> f.getData() != null && f.getData().equals(hoje))
                 .count();
-        long frequenciaDiaria = presencasHoje;
         long frequenciaHoje = alunosAtivos > 0
-                ? Math.round((presencasHoje * 100.0) / alunosAtivos)
+                ? Math.round((frequenciaDiaria * 100.0) / alunosAtivos)
                 : 0;
-        long frequenciaMensal = todasFrequencias.stream()
+        long frequenciaMensal = frequenciaRepository.findAll().stream()
                 .filter(f -> f.getData() != null && !f.getData().isBefore(inicioMes) && !f.getData().isAfter(fimMes))
                 .count();
-
-        // Alunos ativos com frequência abaixo do limite no mês corrente.
-        // Mesmo critério do resumo por aluno: dias úteis decorridos do mês.
-        long diasUteisDecorridos = contarDiasUteis(inicioMes, hoje);
-        long alunosBaixaFrequencia = 0;
-        if (diasUteisDecorridos > 0) {
-            for (com.belval.academia.model.Aluno a : alunoRepository.findAll()) {
-                if (!"ATIVO".equals(a.getSituacao())) continue;
-                long presencas = todasFrequencias.stream()
-                        .filter(f -> f.getAluno() != null && a.getId().equals(f.getAluno().getId()))
-                        .filter(f -> f.getData() != null && !f.getData().isBefore(inicioMes) && !f.getData().isAfter(hoje))
-                        .map(Frequencia::getData)
-                        .distinct()
-                        .count();
-                if ((presencas * 100.0) / diasUteisDecorridos < LIMITE_BAIXA_FREQUENCIA) {
-                    alunosBaixaFrequencia++;
-                }
-            }
-        }
 
         Map<String, Object> result = new java.util.HashMap<>();
         result.put("totalAlunos", totalAlunos);
@@ -144,20 +115,6 @@ public class DashboardController {
         result.put("frequenciaHoje", frequenciaHoje);
         result.put("frequenciaDiaria", frequenciaDiaria);
         result.put("frequenciaMensal", frequenciaMensal);
-        result.put("presencasHoje", presencasHoje);
-        result.put("alunosBaixaFrequencia", alunosBaixaFrequencia);
         return result;
-    }
-
-    /** Dias úteis (segunda a sexta), inclusive nas duas pontas. */
-    private long contarDiasUteis(LocalDate inicio, LocalDate fim) {
-        long total = 0;
-        for (LocalDate d = inicio; !d.isAfter(fim); d = d.plusDays(1)) {
-            switch (d.getDayOfWeek()) {
-                case SATURDAY, SUNDAY -> { }
-                default -> total++;
-            }
-        }
-        return total;
     }
 }
