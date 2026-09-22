@@ -29,6 +29,12 @@ public class DataSeeder implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
+        // Base de dev/teste ja populada (massa de dados coerente): o seed NAO
+        // recria as contas antigas a cada inicializacao. Ele atua apenas em
+        // banco vazio (bootstrap), evitando poluir a base com usuarios legados.
+        if (usuarioRepository.count() > 0) {
+            return;
+        }
         for (ContaTeste conta : CONTAS) {
             Optional<Usuario> existente = usuarioRepository.findByEmail(conta.email);
             if (existente.isPresent()) {
