@@ -3,6 +3,7 @@ package com.belval.academia.controller;
 import com.belval.academia.model.Equipamento;
 import com.belval.academia.model.Chamado;
 import com.belval.academia.model.ManutencaoPreventiva;
+import com.belval.academia.model.SlaPolicy;
 import com.belval.academia.repository.EquipamentoRepository;
 import com.belval.academia.repository.ChamadoRepository;
 import com.belval.academia.repository.ManutencaoPreventivaRepository;
@@ -47,14 +48,108 @@ public class ManutencaoController {
     }
 
     @PostMapping("/equipamentos")
-    public Equipamento criarEquipamento(@RequestBody Equipamento e) {
-        return equipamentoRepository.save(e);
+    public ResponseEntity<?> criarEquipamento(@RequestBody Equipamento e) {
+        // RODADA 5: identificação (nome) é gerada pelo sistema via
+        // /equipamentos/proxima-identificacao. Aqui só garantimos que não
+        // sejam criadas duas unidades com a mesma identificação.
+        String nome = e.getNome() != null ? e.getNome().trim() : "";
+        if (nome.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("erro", "Informe o tipo do equipamento para gerar a identificação."));
+        }
+        synchronized (equipamentoRepository) {
+            boolean duplicado = equipamentoRepository.findAll().stream()
+                    .anyMatch(x -> x.getNome() != null && x.getNome().trim().equalsIgnoreCase(nome));
+            if (duplicado) {
+                return ResponseEntity.status(409).body(Map.of(
+                        "erro", "Já existe um equipamento com a identificação \"" + nome + "\".",
+                        "campo", "nome"));
+            }
+            e.setNome(nome);
+            return ResponseEntity.ok(equipamentoRepository.save(e));
+        }
+    }
+
+    /**
+     * RODADA 5 — Geração automática da identificação do equipamento.
+     *
+     * Dado o tipo (ex.: "Esteira"), procura as identificações existentes
+     * daquele tipo ("Esteira", "Esteira 01", "Esteira 02", ...) e devolve a
+     * próxima ("Esteira 04"). A numeração é por tipo, não global. O cálculo
+     * é feito no servidor para não depender de contador no frontend.
+     */
+    @GetMapping("/equipamentos/proxima-identificacao")
+    public ResponseEntity<?> proximaIdentificacao(@RequestParam String tipo) {
+        String base = tipo != null ? tipo.trim().replaceAll("\\s+", " ") : "";
+        // Preserva a capitalização digitada, mas usa uma forma normalizada
+        // para comparar com os existentes (case-insensitive nos helpers).
+        if (base.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("erro", "Informe o tipo do equipamento."));
+        }
+        synchronized (equipamentoRepository) {
+            int maior = 0;
+            boolean existeDoTipo = false;
+            for (Equipamento eq : equipamentoRepository.findAll()) {
+                String nome = eq.getNome() != null ? eq.getNome().trim() : "";
+                int numero = numeroDaIdentificacao(nome, base);
+                if (numero >= 0) {
+                    existeDoTipo = true;
+                    if (numero > maior) {
+                        maior = numero;
+                    }
+                }
+            }
+            // Nenhum do tipo ainda: começa em 01. "Esteira" puro conta como 0,
+            // então a próxima vira "Esteira 01".
+            int proximo = existeDoTipo ? maior + 1 : 1;
+            String identificacao = base + " " + String.format("%02d", proximo);
+            return ResponseEntity.ok(Map.of("tipo", base, "identificacao", identificacao));
+        }
+    }
+
+    /**
+     * Se o nome pertence ao tipo informado, devolve o número da unidade:
+     * "Esteira" -> 0, "Esteira 01" -> 1. Caso contrário, -1.
+     */
+    private static int numeroDaIdentificacao(String nome, String tipoBase) {
+        if (nome.equalsIgnoreCase(tipoBase)) {
+            return 0;
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("^(.*?)\\s+0*(\\d+)\\s*$")
+                .matcher(nome);
+        if (m.matches() && m.group(1).trim().equalsIgnoreCase(tipoBase)) {
+            try {
+                return Integer.parseInt(m.group(2));
+            } catch (NumberFormatException ex) {
+                return -1;
+            }
+        }
+        return -1;
     }
 
     @PutMapping("/equipamentos/{id}")
-    public ResponseEntity<Equipamento> atualizarEquipamento(@PathVariable Long id, @RequestBody Equipamento e) {
+    public ResponseEntity<?> atualizarEquipamento(@PathVariable Long id, @RequestBody Equipamento e) {
         return equipamentoRepository.findById(id)
-                .map(existing -> { e.setId(id); return ResponseEntity.ok(equipamentoRepository.save(e)); })
+                .map(existing -> {
+                    // RODADA 5: a identificação existente é preservada — a edição
+                    // não renomeia a unidade (evita quebrar histórico). Se o nome
+                    // vier diferente, só aceita se não colidir com outro registro.
+                    String nome = e.getNome() != null && !e.getNome().isBlank()
+                            ? e.getNome().trim()
+                            : existing.getNome();
+                    boolean colide = equipamentoRepository.findAll().stream()
+                            .anyMatch(x -> !x.getId().equals(id)
+                                    && x.getNome() != null
+                                    && x.getNome().trim().equalsIgnoreCase(nome));
+                    if (colide) {
+                        return ResponseEntity.status(409).body(Map.of(
+                                "erro", "Já existe outro equipamento com a identificação \"" + nome + "\".",
+                                "campo", "nome"));
+                    }
+                    e.setId(id);
+                    e.setNome(nome);
+                    return ResponseEntity.ok(equipamentoRepository.save(e));
+                })
                 .orElse(ResponseEntity.notFound().build());
     }
 
@@ -73,6 +168,14 @@ public class ManutencaoController {
 
     @PostMapping("/chamados")
     public Chamado criarChamado(@RequestBody Chamado c) {
+        // RODADA 1 — SLA DE MANUTENÇÃO: o prazo é sempre calculado pelo
+        // sistema a partir da prioridade. Qualquer valor enviado pelo
+        // frontend é ignorado. Chamados históricos não são afetados aqui
+        // (apenas novos chamados passam por este endpoint).
+        if (c.getPrioridade() == null || c.getPrioridade().isBlank()) {
+            c.setPrioridade(SlaPolicy.prioridadePadrao());
+        }
+        c.setSlaDias(SlaPolicy.slaDiasParaPrioridade(c.getPrioridade()));
         return chamadoRepository.save(c);
     }
 
@@ -86,6 +189,23 @@ public class ManutencaoController {
         return chamadoRepository.findById(id)
                 .map(existing -> {
                     c.setId(id);
+                    // RODADA 1 — SLA DE MANUTENÇÃO: o técnico/nem a recepção
+                    // podem arbitrar o SLA. Regras:
+                    // - se a prioridade foi alterada, o SLA é recalculado
+                    //   pelo sistema a partir da nova prioridade;
+                    // - se a prioridade NÃO mudou, o SLA histórico é
+                    //   preservado (qualquer slaDias enviado é ignorado).
+                    boolean prioridadeMudou = c.getPrioridade() != null
+                            && !c.getPrioridade().isBlank()
+                            && (existing.getPrioridade() == null
+                                || !c.getPrioridade().equalsIgnoreCase(existing.getPrioridade()));
+                    if (prioridadeMudou) {
+                        Integer recalculado = SlaPolicy.slaDiasParaPrioridade(c.getPrioridade());
+                        c.setSlaDias(recalculado != null ? recalculado : existing.getSlaDias());
+                    } else {
+                        c.setPrioridade(existing.getPrioridade());
+                        c.setSlaDias(existing.getSlaDias());
+                    }
                     if ("FINALIZADO".equals(c.getStatus()) && c.getDataConclusao() == null) {
                         c.setDataConclusao(LocalDate.now());
                     }

@@ -321,16 +321,24 @@ public class FinanceiroController {
     }
 
     // ===== DESPESA VINDA DE MANUTENÇÃO (integração) =====
+    // RODADA 3: a descrição digitada na manutenção é salva como-is na Despesa
+    // (mesmo registro financeiro exibido em /financeiro). Sem prefixo, para que
+    // o valor seja único e consistente nos dois contextos. Despesas antigas
+    // (com prefixo "Manutenção - ...") continuam intactas.
     @PostMapping("/despesas/manutencao")
     public ResponseEntity<Despesa> criarDespesaManutencao(@RequestBody DespesaManutencaoRequest req) {
         Despesa d = new Despesa();
         d.setTipo("MANUTENCAO");
         d.setClassificacao("VARIAVEL");
-        String base = (req.getDescricao() == null || req.getDescricao().isBlank()) ? "Serviço" : req.getDescricao();
-        String equip = req.getEquipamento();
-        d.setDescricao((equip != null && !equip.isBlank())
-                ? "Manutenção - " + equip + " - " + base
-                : "Manutenção - " + base);
+        String informada = req.getDescricao() != null ? req.getDescricao().trim() : "";
+        if (!informada.isEmpty()) {
+            d.setDescricao(informada);
+        } else {
+            String equip = req.getEquipamento();
+            d.setDescricao((equip != null && !equip.isBlank())
+                    ? "Manutenção - " + equip + " - Serviço"
+                    : "Manutenção - Serviço");
+        }
         d.setValor(req.getValor());
         d.setData(req.getData() != null ? req.getData() : LocalDate.now());
         d.setManutencaoId(req.getManutencaoId());
