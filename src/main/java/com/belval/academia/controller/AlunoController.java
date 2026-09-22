@@ -39,6 +39,11 @@ public class AlunoController {
     public ResponseEntity<Aluno> atualizar(@PathVariable Long id, @RequestBody Aluno aluno) {
         return alunoRepository.findById(id)
                 .map(existing -> {
+                    // O cadastro atual não envia o atestado médico; preserva o
+                    // arquivo existente para não apagá-lo em uma atualização.
+                    if (aluno.getAtestadoMedicoBase64() == null) {
+                        aluno.setAtestadoMedicoBase64(existing.getAtestadoMedicoBase64());
+                    }
                     aluno.setId(id);
                     return ResponseEntity.ok(alunoRepository.save(aluno));
                 })
