@@ -35,7 +35,16 @@ public class FuncionarioController {
     @PutMapping("/{id}")
     public ResponseEntity<Funcionario> atualizar(@PathVariable Long id, @RequestBody Funcionario f) {
         return funcionarioRepository.findById(id)
-                .map(existing -> { f.setId(id); return ResponseEntity.ok(funcionarioRepository.save(f)); })
+                .map(existing -> {
+                    // O cadastro atual não envia o vínculo com a conta de acesso
+                    // (usuarioId); preserva o vínculo existente para não apagar
+                    // o relacionamento funcionario -> usuario em uma atualização.
+                    if (f.getUsuarioId() == null) {
+                        f.setUsuarioId(existing.getUsuarioId());
+                    }
+                    f.setId(id);
+                    return ResponseEntity.ok(funcionarioRepository.save(f));
+                })
                 .orElse(ResponseEntity.notFound().build());
     }
 
