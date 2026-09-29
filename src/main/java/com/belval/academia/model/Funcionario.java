@@ -6,6 +6,9 @@ import java.time.LocalDate;
 
 @Entity
 @Data
+// Mesma trava do aluno: CPF único dentro da tabela (a unicidade cruzada
+// aluno x funcionário para valores novos é validada na aplicação).
+@Table(indexes = @Index(name = "UX_funcionario_cpf", columnList = "cpf", unique = true))
 public class Funcionario {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

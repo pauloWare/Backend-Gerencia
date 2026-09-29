@@ -5,6 +5,7 @@ import lombok.Data;
 
 @Entity
 @Data // Use o Lombok para não precisar escrever getters/setters
+@Table(indexes = @Index(name = "UX_usuario_email", columnList = "email", unique = true))
 public class Usuario {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

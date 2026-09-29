@@ -14,6 +14,9 @@ public interface FrequenciaRepository extends JpaRepository<Frequencia, Long> {
 
     // Data/hora oficiais vindas do próprio banco (SQL Server ou PostgreSQL). É a fonte de horário
     // do check-in, evitando depender do relógio do celular do aluno.
+    // Retorna Object porque cada banco mapeia CURRENT_TIMESTAMP para um tipo Java
+    // diferente (SQL Server -> Timestamp, H2 -> OffsetDateTime). A conversão é feita
+    // em dataHoraServidor() no controller.
     @Query(value = "SELECT CURRENT_TIMESTAMP", nativeQuery = true)
-    java.sql.Timestamp dataHoraServidor();
+    Object dataHoraServidor();
 }

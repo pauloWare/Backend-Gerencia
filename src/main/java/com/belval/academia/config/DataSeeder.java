@@ -2,8 +2,10 @@ package com.belval.academia.config;
 
 import com.belval.academia.model.Usuario;
 import com.belval.academia.repository.UsuarioRepository;
+import com.belval.academia.util.Normalizacao;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -11,14 +13,20 @@ import java.util.Optional;
 
 /**
  * Contas de desenvolvimento do TCC.
- * Cria as 4 contas de teste (uma por cargo) caso ainda não existam.
- * Se a conta já existir, apenas garante nome/senha/cargo corretos (sem duplicar).
+ *
+ * <p>Cria as 4 contas de teste (uma por cargo) apenas quando a base está vazia
+ * (bootstrap). A senha das contas criadas é gravada com BCrypt — nunca em texto
+ * puro. Se a conta já existe, os dados não são sobrescritos e a senha atual é
+ * sempre preservada.</p>
  */
 @Component
 public class DataSeeder implements CommandLineRunner {
 
     @Autowired
     private UsuarioRepository usuarioRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
 
     private static final List<ContaTeste> CONTAS = List.of(
             new ContaTeste("Administrador", "admin@academia.com", "admin123", "ADMIN"),
@@ -29,14 +37,14 @@ public class DataSeeder implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
-        // Base de dev/teste ja populada (massa de dados coerente): o seed NAO
-        // recria as contas antigas a cada inicializacao. Ele atua apenas em
-        // banco vazio (bootstrap), evitando poluir a base com usuarios legados.
+        // Base de dev/teste já populada (massa de dados coerente): o seed NÃO
+        // recria as contas antigas a cada inicialização. Ele atua apenas em
+        // banco vazio (bootstrap), evitando poluir a base com usuários legados.
         if (usuarioRepository.count() > 0) {
             return;
         }
         for (ContaTeste conta : CONTAS) {
-            Optional<Usuario> existente = usuarioRepository.findByEmail(conta.email);
+            Optional<Usuario> existente = usuarioRepository.findByEmailIgnoreCase(conta.email);
             if (existente.isPresent()) {
                 Usuario u = existente.get();
                 boolean alterado = false;
@@ -44,22 +52,20 @@ public class DataSeeder implements CommandLineRunner {
                     u.setNome(conta.nome);
                     alterado = true;
                 }
-                if (!conta.senha.equals(u.getSenha())) {
-                    u.setSenha(conta.senha);
-                    alterado = true;
-                }
                 if (!conta.cargo.equals(u.getCargo())) {
                     u.setCargo(conta.cargo);
                     alterado = true;
                 }
+                // A senha existente é preservada de propósito (nunca regravada).
                 if (alterado) {
                     usuarioRepository.save(u);
                 }
             } else {
                 Usuario u = new Usuario();
                 u.setNome(conta.nome);
-                u.setEmail(conta.email);
-                u.setSenha(conta.senha);
+                u.setEmail(Normalizacao.email(conta.email));
+                // Senha sempre com hash: nem a base de desenvolvimento guarda texto puro.
+                u.setSenha(passwordEncoder.encode(conta.senha));
                 u.setCargo(conta.cargo);
                 u.setStatus("user");
                 usuarioRepository.save(u);

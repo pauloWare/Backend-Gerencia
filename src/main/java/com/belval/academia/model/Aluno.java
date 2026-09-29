@@ -6,6 +6,11 @@ import java.time.LocalDate;
 
 @Entity
 @Data
+// Trava contra corrida simultânea: o CPF é normalizado (só dígitos) antes de
+// gravar e validado na aplicação; o índice impede duplicidade no banco.
+// E-mails de contato (aluno.email) podem se repetir legitimamente e por isso
+// NÃO têm índice único — só a identidade de login (usuario.email) tem.
+@Table(indexes = @Index(name = "UX_aluno_cpf", columnList = "cpf", unique = true))
 public class Aluno {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

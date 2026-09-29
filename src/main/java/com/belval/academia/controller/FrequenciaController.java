@@ -161,8 +161,14 @@ public class FrequenciaController {
 
     /** Data/hora oficial do registro vindas do banco (SQL Server), nunca do navegador. */
     private java.sql.Timestamp dataHoraServidor() {
-        java.sql.Timestamp agora = frequenciaRepository.dataHoraServidor();
-        return agora != null ? agora : java.sql.Timestamp.valueOf(java.time.LocalDateTime.now());
+        Object bruto = frequenciaRepository.dataHoraServidor();
+        if (bruto == null) return java.sql.Timestamp.valueOf(java.time.LocalDateTime.now());
+        if (bruto instanceof java.sql.Timestamp ts) return ts;
+        if (bruto instanceof java.time.OffsetDateTime odt) return java.sql.Timestamp.from(odt.toInstant());
+        if (bruto instanceof java.time.ZonedDateTime zdt) return java.sql.Timestamp.from(zdt.toInstant());
+        if (bruto instanceof java.time.LocalDateTime ldt) return java.sql.Timestamp.valueOf(ldt);
+        if (bruto instanceof java.util.Date d) return new java.sql.Timestamp(d.getTime());
+        return java.sql.Timestamp.valueOf(java.time.LocalDateTime.now());
     }
 
     /** Token do dia = SHA-256(segredo + data). Invalida automaticamente quando o dia muda. */
