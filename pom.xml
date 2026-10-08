@@ -108,8 +108,11 @@
                         </goals>
                         <configuration>
                             <files>
-                                <file>\${project.basedir}/.env</file>
+                                <file>${project.basedir}/.env</file>
                             </files>
+                            <!-- .env opcional: build (Render) funciona sem o arquivo;
+                                 local com .env continua carregando normalmente. -->
+                            <quiet>true</quiet>
                         </configuration>
                     </execution>
                 </executions>
