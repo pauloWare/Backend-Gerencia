@@ -85,6 +85,16 @@ public class AutenticacaoService {
         return passwordEncoder.encode(senha);
     }
 
+    /**
+     * Recarrega a conta de acesso a partir do id. Usada ao restaurar a sessão no
+     * aplicativo: o id vem do token já validado, e o registro é reconsultado no
+     * banco para que uma conta removida ou com cargo alterado perca/ganhe acesso
+     * imediatamente.
+     */
+    public Optional<Usuario> buscarPorId(Long id) {
+        return id == null ? Optional.empty() : usuarioRepository.findById(id);
+    }
+
     /** Indica se o valor armazenado já é um hash BCrypt (e não texto puro). */
     public static boolean ehHashBcrypt(String senha) {
         return senha != null

@@ -1,5 +1,6 @@
 package com.belval.academia.security;
 
+import com.belval.academia.model.Aluno;
 import com.belval.academia.model.Usuario;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
@@ -41,6 +42,17 @@ public class TokenService {
     /** Emissor gravado/validado no token (evita aceitar token de outro sistema). */
     static final String EMISSOR = "gerencia-academia";
 
+    /**
+     * Cargo do aluno no portal mobile. O aluno NÃO é uma conta de {@code usuario}:
+     * a identidade dele é o {@code Aluno} (tabela própria, sem senha). Por isso o
+     * token do aluno usa o subject no formato {@code aluno:<id>}, distinguindo-o
+     * dos tokens administrativos (que usam apenas o id numérico do usuário).
+     */
+    public static final String CARGO_ALUNO = "ALUNO";
+
+    /** Prefixo do subject usado apenas nos tokens de aluno. */
+    public static final String PREFIXO_ALUNO = "aluno:";
+
     /** HS256 exige, no mínimo, 256 bits (32 caracteres/bytes). */
     private static final int TAMANHO_MINIMO_SEGREDO = 32;
 
@@ -73,6 +85,25 @@ public class TokenService {
     }
 
     /**
+     * Gera o token de acesso do ALUNO no portal mobile.
+     *
+     * <p>O subject identifica o {@code Aluno} ({@code aluno:<id>}) e o cargo
+     * gravado é sempre {@code ALUNO} — o aluno nunca recebe papel administrativo.
+     * O token não carrega CPF, e-mail, senha nem qualquer dado pessoal.</p>
+     */
+    public String gerarTokenAluno(Aluno aluno) {
+        Instant agora = Instant.now();
+        return Jwts.builder()
+                .issuer(EMISSOR)
+                .subject(PREFIXO_ALUNO + aluno.getId())
+                .claim("cargo", CARGO_ALUNO)
+                .issuedAt(Date.from(agora))
+                .expiration(Date.from(agora.plus(validade)))
+                .signWith(chave, Jwts.SIG.HS256)
+                .compact();
+    }
+
+    /**
      * Valida assinatura, emissor e expiração. Devolve as informações do token
      * somente quando ele é legítimo; em qualquer outro caso, {@code Optional.empty()}.
      */
@@ -91,6 +122,32 @@ public class TokenService {
         } catch (JwtException | IllegalArgumentException e) {
             // Token inválido/expirado/assinatura errada: não vaza detalhes ao cliente.
             log.debug("Token rejeitado: {}", e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * Indica se o subject do token é de um aluno ({@code aluno:<id>}).
+     * Puro (não valida assinatura): deve ser usado apenas sobre um token já
+     * validado por {@link #validarToken(String)}.
+     */
+    public boolean ehTokenDeAluno(Claims claims) {
+        String assunto = claims == null ? null : claims.getSubject();
+        return assunto != null && assunto.startsWith(PREFIXO_ALUNO);
+    }
+
+    /** Identificador do aluno presente em um token de aluno já validado. */
+    public Optional<Long> idDoAluno(Claims claims) {
+        if (claims == null) {
+            return Optional.empty();
+        }
+        String assunto = claims.getSubject();
+        if (assunto == null || !assunto.startsWith(PREFIXO_ALUNO)) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(Long.valueOf(assunto.substring(PREFIXO_ALUNO.length())));
+        } catch (NumberFormatException e) {
             return Optional.empty();
         }
     }

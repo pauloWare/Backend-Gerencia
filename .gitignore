@@ -32,3 +32,7 @@ build/
 ### VS Code ###
 .vscode/
 node_modules/
+
+
+# Segredos locais — nunca versionar (ver .env.example)
+.env

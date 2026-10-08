@@ -1,12 +1,15 @@
 package com.belval.academia.controller;
 
+import com.belval.academia.dto.DefinirSenhaAlunoDTO;
 import com.belval.academia.exception.ErroDeRegraDeNegocio;
 import com.belval.academia.model.Aluno;
 import com.belval.academia.repository.AlunoRepository;
+import com.belval.academia.service.AlunoAcessoService;
 import com.belval.academia.service.UnicidadeCadastroService;
 import com.belval.academia.util.Normalizacao;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.List;
@@ -23,10 +26,17 @@ public class AlunoController {
 
     private final AlunoRepository alunoRepository;
     private final UnicidadeCadastroService unicidade;
+    private final AlunoAcessoService alunoAcessoService;
+    private final PasswordEncoder passwordEncoder;
 
-    public AlunoController(AlunoRepository alunoRepository, UnicidadeCadastroService unicidade) {
+    public AlunoController(AlunoRepository alunoRepository,
+                           UnicidadeCadastroService unicidade,
+                           AlunoAcessoService alunoAcessoService,
+                           PasswordEncoder passwordEncoder) {
         this.alunoRepository = alunoRepository;
         this.unicidade = unicidade;
+        this.alunoAcessoService = alunoAcessoService;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @GetMapping
@@ -37,6 +47,11 @@ public class AlunoController {
     @PostMapping
     public Aluno criar(@RequestBody Aluno aluno) {
         prepararDados(aluno, null, null);
+        // A senha de acesso e a foto têm rotas próprias e protegidas; um
+        // cadastro nunca as define por engano (a senha é liberada depois por
+        // PUT /api/aluno/{id}/senha-acesso).
+        aluno.setSenha(null);
+        aluno.setFotoPerfilBase64(null);
         return alunoRepository.save(aluno);
     }
 
@@ -56,11 +71,71 @@ public class AlunoController {
                     if (aluno.getAtestadoMedicoBase64() == null) {
                         aluno.setAtestadoMedicoBase64(existing.getAtestadoMedicoBase64());
                     }
+                    // A senha de acesso e a foto de perfil NUNCA são alteradas por
+                    // esta rota: são geridas em endpoints próprios e
+                    // deliberadamente separados (PUT /api/aluno/{id}/senha-acesso
+                    // e o portal do aluno), preservando o que já existia.
+                    aluno.setSenha(existing.getSenha());
+                    aluno.setFotoPerfilBase64(existing.getFotoPerfilBase64());
                     prepararDados(aluno, id, existing.getCpf());
                     aluno.setId(id);
                     return ResponseEntity.ok(alunoRepository.save(aluno));
                 })
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    /**
+     * Define (ou redefine) a senha de acesso de um aluno ao aplicativo.
+     *
+     * <p>É a etapa de definição de credencial compatível com o projeto: a conta de
+     * acesso do aluno é criada aqui, pela recepção ou pelo administrador, que já
+     * são as permissões de {@code /api/aluno/**}. Nenhuma senha é inventada pelo
+     * sistema — sem esta chamada, o aluno simplesmente ainda não consegue entrar
+     * (e os cadastros já existentes continuam válidos e intactos).</p>
+     *
+     * <p>A senha é gravada com BCrypt e nunca é devolvida na resposta.</p>
+     */
+    @PutMapping("/{id}/senha-acesso")
+    public ResponseEntity<Map<String, String>> definirSenhaAcesso(
+            @PathVariable Long id,
+            @RequestBody(required = false) DefinirSenhaAlunoDTO dados) {
+        Aluno alvo = alunoRepository.findById(id)
+                .orElseThrow(() -> new ErroDeRegraDeNegocio(HttpStatus.NOT_FOUND,
+                        "Aluno não encontrado."));
+
+        if (dados == null || dados.getSenha() == null || dados.getSenha().isBlank()) {
+            throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST,
+                    "Informe a senha de acesso do aluno.", "senha");
+        }
+        String senha = dados.getSenha();
+        if (senha.length() < AlunoAcessoService.SENHA_MINIMA) {
+            throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST,
+                    "A senha deve ter no mínimo " + AlunoAcessoService.SENHA_MINIMA + " caracteres.", "senha");
+        }
+        if (dados.getConfirmarSenha() != null && !senha.equals(dados.getConfirmarSenha())) {
+            throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST, "As senhas não conferem.", "confirmarSenha");
+        }
+
+        String email = Normalizacao.email(alvo.getEmail());
+        if (email == null || !EMAIL.matcher(email).matches()) {
+            throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST,
+                    "O aluno precisa ter um e-mail válido cadastrado para acessar o aplicativo.", "email");
+        }
+        // Impede que dois alunos com senha passem a compartilhar a mesma
+        // identidade de login (o que tornaria o login ambíguo).
+        if (alunoRepository.existeEmailDeAcesso(email, alvo.getId())) {
+            throw new ErroDeRegraDeNegocio(HttpStatus.CONFLICT,
+                    "Este e-mail já está em uso por outro aluno.", "email");
+        }
+        if (alunoAcessoService.emailPertenceAEquipe(email)) {
+            throw new ErroDeRegraDeNegocio(HttpStatus.CONFLICT,
+                    "Este e-mail já está em uso por uma conta da equipe.", "email");
+        }
+
+        alvo.setSenha(passwordEncoder.encode(senha)); // sempre com hash
+        alunoRepository.save(alvo);
+
+        return ResponseEntity.ok(Map.of("mensagem", "Senha de acesso do aluno atualizada."));
     }
 
     /**

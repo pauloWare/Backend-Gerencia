@@ -14,6 +14,46 @@ public interface AlunoRepository extends JpaRepository<Aluno, Long> {
     boolean existsByCpf(String cpf);
 
     /**
+     * Localiza o aluno pelo e-mail de LOGIN (sem diferenciar maiúsculas e
+     * minúsculas). Só devolve quem já tem senha de acesso definida — aluno sem
+     * senha cadastrada não é uma conta de acesso e nunca autentica.
+     *
+     * <p>A busca ignora e-mails vazios: {@code senha IS NOT NULL} não é
+     * suficiente porque registros antigos podem ter a coluna como string vazia.
+     * Por isso filtramos também em memória (volume baixo, como no resto do
+     * projeto — ver {@link #localizarPorCpf(String)}).</p>
+     */
+    default Optional<Aluno> localizarPorEmailDeAcesso(String email) {
+        String normalizado = Normalizacao.email(email);
+        if (normalizado == null) {
+            return Optional.empty();
+        }
+        return findAll().stream()
+                .filter(a -> a.getEmail() != null && a.getEmail().equalsIgnoreCase(normalizado))
+                .filter(Aluno::possuiSenhaDeAcesso)
+                .findFirst();
+    }
+
+    /**
+     * Verifica se outro aluno (diferente de {@code idIgnorado}) já usa este
+     * e-mail como identidade de login. Só quem tem senha de acesso conta:
+     * assim dois alunos da mesma família podem continuar com o mesmo e-mail de
+     * contato enquanto um deles ainda não tem conta liberada.
+     */
+    default boolean existeEmailDeAcesso(String email, Long idIgnorado) {
+        String normalizado = Normalizacao.email(email);
+        if (normalizado == null) {
+            return false;
+        }
+        return findAll().stream()
+                .filter(a -> a.getEmail() != null && a.getEmail().equalsIgnoreCase(normalizado))
+                .filter(Aluno::possuiSenhaDeAcesso)
+                .filter(a -> idIgnorado == null || !Objects.equals(a.getId(), idIgnorado))
+                .findFirst()
+                .isPresent();
+    }
+
+    /**
      * Existência de CPF considerando apenas os dígitos, para reconhecer como
      * duplicados valores gravados com ou sem máscara (registros legados).
      * O {@code idIgnorado} permite que, na edição, o aluno mantenha o próprio CPF.

@@ -1,6 +1,8 @@
 package com.belval.academia.security;
 
+import com.belval.academia.model.Aluno;
 import com.belval.academia.model.Usuario;
+import com.belval.academia.repository.AlunoRepository;
 import com.belval.academia.repository.UsuarioRepository;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
@@ -37,15 +39,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final TokenService tokenService;
     private final UsuarioRepository usuarioRepository;
+    private final AlunoRepository alunoRepository;
     private final AuthenticationEntryPoint entryPoint;
 
     @Autowired
     public JwtAuthenticationFilter(TokenService tokenService,
                                    UsuarioRepository usuarioRepository,
+                                   AlunoRepository alunoRepository,
                                    RestAuthenticationEntryPoint entryPoint) {
         this.tokenService = tokenService;
         this.usuarioRepository = usuarioRepository;
+        this.alunoRepository = alunoRepository;
         this.entryPoint = entryPoint;
+    }
+
+    /** Cargo gravado no token (nunca lido do cliente), ou {@code null}. */
+    private static String cargoDoToken(Claims claims) {
+        Object cargo = claims == null ? null : claims.get("cargo");
+        return cargo == null ? null : String.valueOf(cargo);
     }
 
     @Override
@@ -70,6 +81,34 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         Optional<Long> id = tokenService.idDoUsuario(claims.get());
+
+        // ===== Token de ALUNO (portal mobile) =====
+        // O subject vem como "aluno:<id>" e o cargo do token precisa ser ALUNO.
+        // A identidade é sempre reconferida no banco (aluno removido perde acesso).
+        if (tokenService.ehTokenDeAluno(claims.get())) {
+            if (!TokenService.CARGO_ALUNO.equalsIgnoreCase(cargoDoToken(claims.get()))) {
+                SecurityContextHolder.clearContext();
+                entryPoint.commence(request, response,
+                        new BadCredentialsException("Token ausente, inválido ou expirado."));
+                return;
+            }
+            Optional<Long> idAluno = tokenService.idDoAluno(claims.get());
+            Optional<Aluno> aluno = idAluno.flatMap(alunoRepository::findById);
+            if (aluno.isEmpty()) {
+                SecurityContextHolder.clearContext();
+                entryPoint.commence(request, response,
+                        new BadCredentialsException("Token ausente, inválido ou expirado."));
+                return;
+            }
+            // O aluno NUNCA recebe autoridade administrativa: apenas ROLE_ALUNO.
+            UsernamePasswordAuthenticationToken autenticacaoAluno = new UsernamePasswordAuthenticationToken(
+                    TokenService.PREFIXO_ALUNO + aluno.get().getId(), null,
+                    List.of(new SimpleGrantedAuthority("ROLE_" + TokenService.CARGO_ALUNO)));
+            SecurityContextHolder.getContext().setAuthentication(autenticacaoAluno);
+            filterChain.doFilter(request, response);
+            return;
+        }
+
         Optional<Usuario> usuario = id.flatMap(usuarioRepository::findById);
         if (usuario.isEmpty()) {
             SecurityContextHolder.clearContext();

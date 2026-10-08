@@ -94,7 +94,27 @@
                 <directory>src/main/resources</directory>
             </resource>
         </resources>
-        <plugins>
+               <plugins>
+            <!-- PLUGIN ADICIONADO AQUI: Ele lê o arquivo .env automaticamente -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>properties-maven-plugin</artifactId>
+                <version>1.2.1</version>
+                <executions>
+                    <execution>
+                        <phase>initialize</phase>
+                        <goals>
+                            <goal>read-project-properties</goal>
+                        </goals>
+                        <configuration>
+                            <files>
+                                <file>\${project.basedir}/.env</file>
+                            </files>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
@@ -105,6 +125,28 @@
                             <artifactId>lombok</artifactId>
                         </exclude>
                     </excludes>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!--
+                        Os testes SEMPRE rodam no H2, mesmo quando SPRING_DATASOURCE_*
+                        estão exportadas no shell (ex.: logo após `source .env`).
+                        Variáveis de ambiente têm prioridade sobre
+                        src/test/resources/application.properties; sem este bloqueio
+                        a suíte tentaria conectar ao banco REAL com
+                        ddl-auto=create-drop e poderia derrubar as tabelas locais.
+                        Só afeta o fork de testes — produção (Render/Supabase)
+                        não é afetada.
+                    -->
+                    <environmentVariables>
+                        <SPRING_DATASOURCE_URL>jdbc:h2:mem:academia-test;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE</SPRING_DATASOURCE_URL>
+                        <SPRING_DATASOURCE_DRIVER>org.h2.Driver</SPRING_DATASOURCE_DRIVER>
+                        <SPRING_DATASOURCE_USERNAME>sa</SPRING_DATASOURCE_USERNAME>
+                        <SPRING_DATASOURCE_PASSWORD></SPRING_DATASOURCE_PASSWORD>
+                    </environmentVariables>
                 </configuration>
             </plugin>
         </plugins>
