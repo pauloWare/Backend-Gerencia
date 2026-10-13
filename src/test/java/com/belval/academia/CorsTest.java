@@ -126,6 +126,43 @@ class CorsTest extends TesteBase {
                 .andExpect(status().isUnauthorized());
     }
 
+    /**
+     * Regressão do bug "código de ativação invisível no navegador": além do
+     * preflight, a RESPOSTA REAL do cadastro precisa expor os cabeçalhos de
+     * ativação via Access-Control-Expose-Headers — sem eles o navegador lê o
+     * header na rede (DevTools), mas o Axios devolve {@code undefined} e o
+     * código nunca chega à tela da recepção.
+     */
+    @Test
+    void cadastroDeAlunoExpoeCabecalhosDeAtivacaoNaRespostaReal() throws Exception {
+        Usuario recepcao = criarUsuario(emailUnico("cors-cadastro"), "SenhaForte123", "RECEPCIONISTA");
+        String emailAluno = emailUnico("aluno-cors-codigo");
+
+        MvcResult resultado = mockMvc.perform(post("/api/aluno")
+                        .header(HttpHeaders.ORIGIN, ORIGEM_VITE)
+                        .header("Authorization", bearer(tokenDe(recepcao)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json(Map.of(
+                                "nome", "Aluno Cors Ativacao",
+                                "cpf", cpfValidoAleatorio(),
+                                "dataNascimento", "1990-01-01",
+                                "email", emailAluno,
+                                "plano", "Mensal"))))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // O navegador só libera a leitura dos headers que estiverem expostos.
+        String expostos = resultado.getResponse()
+                .getHeader(HttpHeaders.ACCESS_CONTROL_EXPOSE_HEADERS);
+        assertThat(expostos).isNotNull();
+        assertThat(expostos).contains("X-Codigo-Ativacao", "X-Conta-Ativa", "X-Aviso-Ativacao");
+
+        // E o código em si precisa estar na resposta (conta nova = não ativa).
+        String codigo = resultado.getResponse().getHeader("X-Codigo-Ativacao");
+        assertThat(codigo).isNotNull().hasSize(8);
+        assertThat(resultado.getResponse().getHeader("X-Conta-Ativa")).isNotNull();
+    }
+
     @Test
     void tokenValidoContinuaAcessandoEndpointProtegidoSemOrigin() throws Exception {
         // Requisições nativas (Expo Go no celular / curl) não enviam Origin e

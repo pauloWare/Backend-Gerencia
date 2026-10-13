@@ -14,6 +14,7 @@ public class WebConfig implements WebMvcConfigurer {
                 .allowedOriginPatterns("http://localhost:*", "https://gerencia-sigma.vercel.app", "https://gerencia-gsdy7lqhm-paulowares-projects.vercel.app") // Isso libera qualquer porta do localhost com segurança
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
+                .exposedHeaders("Authorization", "X-Codigo-Ativacao", "X-Conta-Ativa", "X-Aviso-Ativacao")
                 .allowCredentials(true);
     }
 }

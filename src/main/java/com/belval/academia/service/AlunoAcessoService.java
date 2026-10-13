@@ -1,10 +1,10 @@
 package com.belval.academia.service;
 
+import com.belval.academia.dto.AtualizarPerfilAlunoDTO;
 import com.belval.academia.exception.ErroDeRegraDeNegocio;
 import com.belval.academia.model.Aluno;
 import com.belval.academia.repository.AlunoRepository;
 import com.belval.academia.repository.UsuarioRepository;
-import com.belval.academia.util.Cpf;
 import com.belval.academia.util.Normalizacao;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,8 +16,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.LocalDate;
-import java.time.format.DateTimeParseException;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
@@ -36,10 +34,11 @@ import java.util.regex.Pattern;
  *       ({@link com.belval.academia.security.UsuarioAutenticado#alunoId()}),
  *       nunca um id enviado pelo cliente — assim um aluno não edita o perfil de
  *       outro alterando parâmetros da requisição.</li>
- *   <li><b>O que é editável.</b> Os dados pessoais do próprio aluno: nome,
- *       e-mail, telefone, CPF e data de nascimento. Plano, situação,
- *       mensalidades, observações, senha e demais dados internos continuam
- *       geridos pela academia — não existem no DTO de edição.</li>
+ *   <li><b>O que é editável.</b> Somente contato (e-mail/telefone), endereço
+ *       estruturado e contato de emergência. Nome, CPF, data de nascimento e
+ *       sexo são protegidos (correção via recepção) e não existem no DTO de
+ *       edição. Plano, situação, mensalidades, observações, senha e demais
+ *       dados internos também não existem aqui.</li>
  *   <li><b>Foto.</b> Base64 no banco (padrão já usado por {@code chamado} e
  *       {@code usuario}), com validação de formato e tamanho.</li>
  * </ul>
@@ -77,17 +76,14 @@ public class AlunoAcessoService {
     private final AlunoRepository alunoRepository;
     private final UsuarioRepository usuarioRepository;
     private final PasswordEncoder passwordEncoder;
-    private final UnicidadeCadastroService unicidade;
 
     public AlunoAcessoService(AlunoRepository alunoRepository,
                               UsuarioRepository usuarioRepository,
                               PasswordEncoder passwordEncoder,
-                              UnicidadeCadastroService unicidade,
                               @Value("${app.upload.foto-max-bytes:1000000}") int fotoMaxBytes) {
         this.alunoRepository = alunoRepository;
         this.usuarioRepository = usuarioRepository;
         this.passwordEncoder = passwordEncoder;
-        this.unicidade = unicidade;
         this.fotoMaxBytes = fotoMaxBytes;
     }
 
@@ -169,107 +165,123 @@ public class AlunoAcessoService {
     }
 
     /**
-     * Aplica a edição dos dados pessoais autorizada ao próprio aluno.
+     * Edição direta do próprio aluno: contato, endereço e emergência.
      *
-     * <p>Recebe apenas nome, e-mail, telefone, CPF e data de nascimento — nenhum
-     * id, cargo, plano ou situação chega até aqui, portanto não existe caminho
-     * para o aluno alterar o próprio cargo/permissões, dados administrativos nem
-     * mexer em outro cadastro.</p>
+     * <p>Nome/CPF/nascimento/sexo NÃO chegam aqui (fora do DTO).</p>
      *
-     * <p>CPF e nascimento seguem a regra "nulo/vazio mantém o valor atual": o
-     * aplicativo envia o que o aluno digitou e a ausência do campo nunca apaga
-     * dado já gravado. CPF é normalizado para somente dígitos antes de salvar e
-     * validado quanto a formato, dígitos verificadores e duplicidade (regras de
-     * {@link UnicidadeCadastroService}); a data é aceita apenas em formato ISO
-     * {@code AAAA-MM-DD} e nunca pode estar no futuro.</p>
-     *
-     * @param alunoId        id derivado do token (nunca enviado pelo cliente)
-     * @param nome           novo nome (obrigatório)
-     * @param email          novo e-mail de contato (também é o e-mail de login)
-     * @param telefone       novo telefone (pode ser nulo)
-     * @param cpf            CPF com ou sem máscara; nulo/vazio = manter o atual
-     * @param dataNascimento data ISO AAAA-MM-DD; nula/vazia = manter a atual
+     * @param alunoId id do token (nunca do cliente)
+     * @param dados somente campos editáveis
      */
     @Transactional
-    public Aluno atualizarPerfil(Long alunoId, String nome, String email, String telefone,
-                                 String cpf, String dataNascimento) {
+    public Aluno atualizarPerfil(Long alunoId, AtualizarPerfilAlunoDTO dados) {
         Aluno aluno = buscar(alunoId);
-
-        String nomeNormalizado = Normalizacao.texto(nome);
-        if (nomeNormalizado == null) {
-            throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST, "Informe o nome.", "nome");
-        }
-        if (nomeNormalizado.length() > 150) {
+        if (dados == null) {
             throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST,
-                    "O nome deve ter no máximo 150 caracteres.", "nome");
+                    "Dados obrigatórios ausentes.", "email");
         }
-
-        String emailNormalizado = Normalizacao.email(email);
-        if (emailNormalizado == null) {
-            throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST, "Informe o e-mail.", "email");
-        }
-        if (!EMAIL.matcher(emailNormalizado).matches()) {
-            throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST, "Informe um e-mail válido.", "email");
-        }
-
-        // O e-mail do aluno é a identidade de login dele. Quando já existe senha
-        // de acesso, o e-mail não pode estar em uso por outro aluno nem por uma
-        // conta de equipe — isso impede que alguém ocupe o acesso de um terceiro
-        // trocando o e-mail do próprio cadastro.
-        if (aluno.possuiSenhaDeAcesso()) {
-            if (alunoRepository.existeEmailDeAcesso(emailNormalizado, alunoId)) {
-                throw new ErroDeRegraDeNegocio(HttpStatus.CONFLICT,
-                        "Este e-mail já está em uso por outro aluno.", "email");
-            }
-            if (emailPertenceAEquipe(emailNormalizado)) {
-                throw new ErroDeRegraDeNegocio(HttpStatus.CONFLICT,
-                        "Este e-mail já está em uso por uma conta da equipe.", "email");
-            }
-        }
-
-        String telefoneNormalizado = Normalizacao.texto(telefone);
-        if (telefoneNormalizado != null && telefoneNormalizado.length() > 30) {
-            throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST,
-                    "O telefone deve ter no máximo 30 caracteres.", "telefone");
-        }
-
-        // CPF: opcional e "em branco mantém o atual" — nunca apaga dado gravado.
-        // Aceita com ou sem máscara; a validação (formato, dígitos verificadores,
-        // duplicidade em aluno e cruzada com funcionário) é a mesma do cadastro
-        // feito pela recepção, e o valor é gravado somente com dígitos — igual ao
-        // padrão de AlunoController.prepararDados, mantendo compatibilidade com
-        // registros legados (o repository compara por dígitos).
-        if (Normalizacao.texto(cpf) != null) {
-            String digitos = Cpf.somenteDigitos(cpf);
-            if (digitos == null || !Cpf.valido(digitos)) {
-                throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST,
-                        "CPF inválido. Confira os dígitos informados.", "cpf");
-            }
-            unicidade.validarCpfAluno(digitos, alunoId, aluno.getCpf());
-            aluno.setCpf(digitos);
-        }
-
-        // Data de nascimento: formato ISO estrito (o app envia AAAA-MM-DD),
-        // recusando data inválida ou futura. Em branco mantém a atual.
-        if (Normalizacao.texto(dataNascimento) != null) {
-            LocalDate nascimento;
-            try {
-                nascimento = LocalDate.parse(dataNascimento.trim());
-            } catch (DateTimeParseException e) {
-                throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST,
-                        "Informe uma data de nascimento válida (AAAA-MM-DD).", "dataNascimento");
-            }
-            if (nascimento.isAfter(LocalDate.now())) {
-                throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST,
-                        "A data de nascimento não pode estar no futuro.", "dataNascimento");
-            }
-            aluno.setDataNascimento(nascimento);
-        }
-
-        aluno.setNome(nomeNormalizado);
-        aluno.setEmail(emailNormalizado);
-        aluno.setTelefone(telefoneNormalizado);
+        aplicarContato(aluno, alunoId, dados);
+        aplicarEndereco(aluno, dados);
+        aplicarEmergencia(aluno, dados);
         return alunoRepository.save(aluno);
+    }
+
+    private void aplicarContato(Aluno aluno, Long alunoId, AtualizarPerfilAlunoDTO dados) {
+        if (dados.getEmail() != null) {
+            String email = Normalizacao.email(dados.getEmail());
+            if (email == null) {
+                throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST, "Informe o e-mail.", "email");
+            }
+            if (email.length() > 150) {
+                throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST,
+                        "O e-mail deve ter no máximo 150 caracteres.", "email");
+            }
+            if (!EMAIL.matcher(email).matches()) {
+                throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST, "Informe um e-mail válido.", "email");
+            }
+            String atual = aluno.getEmail() == null ? "" : aluno.getEmail();
+            if (aluno.possuiSenhaDeAcesso() && !email.equalsIgnoreCase(atual)) {
+                if (alunoRepository.existeEmailDeAcesso(email, alunoId)) {
+                    throw new ErroDeRegraDeNegocio(HttpStatus.CONFLICT,
+                            "Este e-mail já está em uso por outro aluno.", "email");
+                }
+                if (emailPertenceAEquipe(email)) {
+                    throw new ErroDeRegraDeNegocio(HttpStatus.CONFLICT,
+                            "Este e-mail já está em uso por uma conta da equipe.", "email");
+                }
+            }
+            aluno.setEmail(email);
+        }
+        if (dados.getTelefone() != null) {
+            aluno.setTelefone(validarTelefone(dados.getTelefone(), "telefone",
+                    "O telefone deve ter no máximo 30 caracteres.", "Informe um telefone válido."));
+        }
+    }
+
+    private void aplicarEndereco(Aluno aluno, AtualizarPerfilAlunoDTO dados) {
+        if (dados.getCep() != null) {
+            String cepTexto = Normalizacao.texto(dados.getCep());
+            if (cepTexto == null) {
+                aluno.setCep(null);
+            } else {
+                String digitos = Normalizacao.somenteDigitos(cepTexto);
+                if (digitos == null || digitos.length() != 8) {
+                    throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST,
+                            "Informe um CEP com 8 dígitos.", "cep");
+                }
+                aluno.setCep(digitos);
+            }
+        }
+        if (dados.getLogradouro() != null) {
+            aluno.setLogradouro(validarTexto(dados.getLogradouro(), 150,
+                    "A rua deve ter no máximo 150 caracteres.", "logradouro"));
+        }
+        if (dados.getNumero() != null) {
+            aluno.setNumero(validarTexto(dados.getNumero(), 20,
+                    "O número deve ter no máximo 20 caracteres.", "numero"));
+        }
+        if (dados.getComplemento() != null) {
+            aluno.setComplemento(validarTexto(dados.getComplemento(), 60,
+                    "O complemento deve ter no máximo 60 caracteres.", "complemento"));
+        }
+        if (dados.getBairro() != null) {
+            aluno.setBairro(validarTexto(dados.getBairro(), 100,
+                    "O bairro deve ter no máximo 100 caracteres.", "bairro"));
+        }
+    }
+
+    private void aplicarEmergencia(Aluno aluno, AtualizarPerfilAlunoDTO dados) {
+        if (dados.getContatoEmergenciaNome() != null) {
+            aluno.setContatoEmergenciaNome(validarTexto(dados.getContatoEmergenciaNome(), 150,
+                    "O nome do contato deve ter no máximo 150 caracteres.", "contatoEmergenciaNome"));
+        }
+        if (dados.getContatoEmergenciaTelefone() != null) {
+            aluno.setContatoEmergenciaTelefone(validarTelefone(dados.getContatoEmergenciaTelefone(),
+                    "contatoEmergenciaTelefone",
+                    "O telefone do contato deve ter no máximo 30 caracteres.",
+                    "Informe um telefone de contato válido."));
+        }
+    }
+
+    private String validarTelefone(String valor, String campo, String msgTamanho, String msgFormato) {
+        String texto = Normalizacao.texto(valor);
+        if (texto == null) {
+            return null;
+        }
+        if (texto.length() > 30) {
+            throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST, msgTamanho, campo);
+        }
+        if (!texto.matches("^[+()\\-\\s\\d]+$")) {
+            throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST, msgFormato, campo);
+        }
+        return texto;
+    }
+
+    private String validarTexto(String valor, int max, String msg, String campo) {
+        String texto = Normalizacao.texto(valor);
+        if (texto != null && texto.length() > max) {
+            throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST, msg, campo);
+        }
+        return texto;
     }
 
     // ==================================================================

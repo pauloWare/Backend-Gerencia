@@ -3,6 +3,7 @@ package com.belval.academia.exception;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -54,6 +55,20 @@ public class GlobalExceptionHandler {
         log.warn("Corpo da requisição inválido: {}", e.getMessage());
         return ResponseEntity.badRequest().body(Map.of(
                 "erro", "Dados obrigatórios ausentes ou em formato inválido."));
+    }
+
+    /**
+     * Conflito de concorrência (ex.: duas ativações do mesmo código ao mesmo
+     * tempo). A perdedora recebe erro genérico — sem ativar duas vezes nem
+     * expor se o código existia.
+     */
+    @ExceptionHandler({OptimisticLockingFailureException.class,
+            jakarta.persistence.OptimisticLockException.class})
+    public ResponseEntity<Map<String, Object>> tratarConflitoDeConcorrencia(RuntimeException e) {
+        log.warn("Conflito de concorrência: {}", e.getMessage());
+        return ResponseEntity.badRequest().body(Map.of(
+                "erro", "Não foi possível ativar a conta. Confira o e-mail e o código.",
+                "campo", "codigo"));
     }
 
     /** Campos obrigatórios/validados por bean validation. */

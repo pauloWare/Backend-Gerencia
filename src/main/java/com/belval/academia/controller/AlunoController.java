@@ -5,6 +5,7 @@ import com.belval.academia.exception.ErroDeRegraDeNegocio;
 import com.belval.academia.model.Aluno;
 import com.belval.academia.repository.AlunoRepository;
 import com.belval.academia.service.AlunoAcessoService;
+import com.belval.academia.service.AtivacaoAlunoService;
 import com.belval.academia.service.UnicidadeCadastroService;
 import com.belval.academia.util.Normalizacao;
 import org.springframework.http.HttpStatus;
@@ -27,15 +28,18 @@ public class AlunoController {
     private final AlunoRepository alunoRepository;
     private final UnicidadeCadastroService unicidade;
     private final AlunoAcessoService alunoAcessoService;
+    private final AtivacaoAlunoService ativacaoService;
     private final PasswordEncoder passwordEncoder;
 
     public AlunoController(AlunoRepository alunoRepository,
                            UnicidadeCadastroService unicidade,
                            AlunoAcessoService alunoAcessoService,
+                           AtivacaoAlunoService ativacaoService,
                            PasswordEncoder passwordEncoder) {
         this.alunoRepository = alunoRepository;
         this.unicidade = unicidade;
         this.alunoAcessoService = alunoAcessoService;
+        this.ativacaoService = ativacaoService;
         this.passwordEncoder = passwordEncoder;
     }
 
@@ -44,15 +48,40 @@ public class AlunoController {
         return alunoRepository.findAll();
     }
 
+    /**
+     * Cadastra o aluno e gera o código de ativação do acesso mobile.
+     *
+     * <p>Compatibilidade: o corpo continua sendo o ALUNO (mesmo contrato de
+     * antes). O código (uso único, temporário) vai no cabeçalho
+     * {@code X-Codigo-Ativacao} — exibido UMA vez à recepção, nunca em
+     * listagens, logs ou consultas. Conta já ativa: cabeçalho
+     * {@code X-Conta-Ativa: true}, sem código novo.</p>
+     */
     @PostMapping
-    public Aluno criar(@RequestBody Aluno aluno) {
+    public ResponseEntity<Aluno> criar(@RequestBody Aluno aluno) {
         prepararDados(aluno, null, null);
         // A senha de acesso e a foto têm rotas próprias e protegidas; um
-        // cadastro nunca as define por engano (a senha é liberada depois por
-        // PUT /api/aluno/{id}/senha-acesso).
+        // cadastro nunca as define por engano (a senha é definida pelo aluno
+        // em POST /api/portal/ativar-conta com o código desta resposta).
         aluno.setSenha(null);
         aluno.setFotoPerfilBase64(null);
-        return alunoRepository.save(aluno);
+        Aluno salvo = alunoRepository.save(aluno);
+        try {
+            AtivacaoAlunoService.CodigoGerado gerado = ativacaoService.gerarPara(salvo);
+            if (gerado.contaJaAtiva()) {
+                return ResponseEntity.ok().header("X-Conta-Ativa", "true").body(salvo);
+            }
+            return ResponseEntity.ok()
+                    .header("X-Codigo-Ativacao", gerado.codigo())
+                    .header("X-Conta-Ativa", "false")
+                    .body(salvo);
+        } catch (ErroDeRegraDeNegocio e) {
+            // Sem e-mail válido: o cadastro foi concluído; o código poderá ser
+            // gerado depois (novo endpoint), sem desfazer o cadastro.
+            return ResponseEntity.ok()
+                    .header("X-Aviso-Ativacao", "codigo-nao-gerado")
+                    .body(salvo);
+        }
     }
 
     @GetMapping("/{id}")
@@ -136,6 +165,31 @@ public class AlunoController {
         alunoRepository.save(alvo);
 
         return ResponseEntity.ok(Map.of("mensagem", "Senha de acesso do aluno atualizada."));
+    }
+
+    /**
+     * Gera (ou substitui) o código de ativação do acesso mobile.
+     *
+     * <p>Usado quando o cadastro foi concluído sem código (ex.: sem e-mail
+     * válido na hora) ou quando o código anterior expirou. O código é
+     * devolvido UMA vez nesta resposta — nunca em listagens ou consultas.
+     * Conta já ativa: informa sem gerar código novo.</p>
+     */
+    @PostMapping("/{id}/codigo-ativacao")
+    public ResponseEntity<Map<String, Object>> gerarCodigoAtivacao(@PathVariable Long id) {
+        Aluno alvo = alunoRepository.findById(id)
+                .orElseThrow(() -> new ErroDeRegraDeNegocio(HttpStatus.NOT_FOUND,
+                        "Aluno não encontrado."));
+        AtivacaoAlunoService.CodigoGerado gerado = ativacaoService.gerarPara(alvo);
+        Map<String, Object> resposta = new HashMap<>();
+        if (gerado.contaJaAtiva()) {
+            resposta.put("contaJaAtiva", true);
+            resposta.put("mensagem", "Esta conta já está ativada.");
+        } else {
+            resposta.put("contaJaAtiva", false);
+            resposta.put("codigoAtivacao", gerado.codigo());
+        }
+        return ResponseEntity.ok(resposta);
     }
 
     /**

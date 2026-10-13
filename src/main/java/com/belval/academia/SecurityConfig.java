@@ -100,6 +100,10 @@ public class SecurityConfig {
                     // Login do aluno: público (CPF + data de nascimento validados
                     // no backend). O aluno não é uma conta de `usuario`.
                     .requestMatchers(HttpMethod.POST, "/api/portal/login").permitAll()
+                    // Ativação da conta pelo próprio aluno (e-mail + código de
+                    // uso único + senha escolhida por ele). Pública como o
+                    // login; sem token, sem dados pessoais na resposta.
+                    .requestMatchers(HttpMethod.POST, "/api/portal/ativar-conta").permitAll()
                     // Frequência e mensalidade do próprio aluno: SOMENTE a sessão
                     // de aluno (ROLE_ALUNO). O id vem do token, nunca do cliente.
                     .requestMatchers("/api/portal/**").hasRole("ALUNO")
@@ -177,7 +181,14 @@ public class SecurityConfig {
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         // O token de autenticação chega no cabeçalho Authorization.
         configuration.setAllowedHeaders(List.of("*"));
-        configuration.setExposedHeaders(List.of("Authorization"));
+        // Headers de ativação lidos pelo frontend após POST /api/aluno.
+        // Sem expô-los aqui, o navegador bloqueia a leitura (CORS) mesmo com
+        // o backend enviando X-Codigo-Ativacao / X-Conta-Ativa / X-Aviso-Ativacao.
+        configuration.setExposedHeaders(List.of(
+                "Authorization",
+                "X-Codigo-Ativacao",
+                "X-Conta-Ativa",
+                "X-Aviso-Ativacao"));
         configuration.setAllowCredentials(true);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

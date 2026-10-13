@@ -3,6 +3,7 @@ package com.belval.academia.controller;
 import com.belval.academia.dto.AlunoLoginRequestDTO;
 import com.belval.academia.dto.AlunoPerfilDTO;
 import com.belval.academia.dto.AlunoSessaoDTO;
+import com.belval.academia.dto.AtivarContaDTO;
 import com.belval.academia.dto.AtualizarPerfilAlunoDTO;
 import com.belval.academia.dto.FotoPerfilAlunoDTO;
 import com.belval.academia.dto.MensalidadeAlunoDTO;
@@ -13,6 +14,7 @@ import com.belval.academia.repository.AlunoRepository;
 import com.belval.academia.security.TokenService;
 import com.belval.academia.security.UsuarioAutenticado;
 import com.belval.academia.service.AlunoAcessoService;
+import com.belval.academia.service.AtivacaoAlunoService;
 import com.belval.academia.service.FrequenciaService;
 import com.belval.academia.service.SituacaoFinanceiraService;
 import org.springframework.http.HttpStatus;
@@ -54,17 +56,20 @@ public class PortalAlunoController {
     private final FrequenciaService frequenciaService;
     private final SituacaoFinanceiraService situacaoFinanceiraService;
     private final AlunoAcessoService alunoAcessoService;
+    private final AtivacaoAlunoService ativacaoService;
 
     public PortalAlunoController(AlunoRepository alunoRepository,
                                  TokenService tokenService,
                                  FrequenciaService frequenciaService,
                                  SituacaoFinanceiraService situacaoFinanceiraService,
-                                 AlunoAcessoService alunoAcessoService) {
+                                 AlunoAcessoService alunoAcessoService,
+                                 AtivacaoAlunoService ativacaoService) {
         this.alunoRepository = alunoRepository;
         this.tokenService = tokenService;
         this.frequenciaService = frequenciaService;
         this.situacaoFinanceiraService = situacaoFinanceiraService;
         this.alunoAcessoService = alunoAcessoService;
+        this.ativacaoService = ativacaoService;
     }
 
     /**
@@ -97,6 +102,26 @@ public class PortalAlunoController {
         resposta.put("token", tokenService.gerarTokenAluno(aluno));
         resposta.put("aluno", new AlunoSessaoDTO(aluno));
         return ResponseEntity.ok(resposta);
+    }
+
+    /**
+     * Ativação da conta mobile pelo próprio aluno ("Ativar minha conta").
+     *
+     * <p>Rota PÚBLICA: e-mail + código de uso único + senha escolhida pelo
+     * aluno. Não devolve sessão/token: após o sucesso o app encaminha ao
+     * login normal. Erros usam mensagem genérica (sem confirmar se o e-mail
+     * existe) e nunca expõem dados pessoais.</p>
+     */
+    @PostMapping("/ativar-conta")
+    public ResponseEntity<Map<String, String>> ativarConta(
+            @RequestBody(required = false) AtivarContaDTO dados) {
+        ativacaoService.ativar(
+                dados == null ? null : dados.getEmail(),
+                dados == null ? null : dados.getCodigo(),
+                dados == null ? null : dados.getSenha(),
+                dados == null ? null : dados.getConfirmarSenha());
+        return ResponseEntity.ok(Map.of(
+                "mensagem", "Conta ativada com sucesso. Entre com seu e-mail e senha."));
     }
 
     /** Resumo de frequência do aluno autenticado (mesma regra do sistema web). */
@@ -133,12 +158,8 @@ public class PortalAlunoController {
     }
 
     /**
-     * Perfil do aluno autenticado: nome, e-mail, telefone, CPF (mascarado),
-     * data de nascimento, plano, situação e a foto de perfil em Base64.
-     *
-     * <p>É a fonte de verdade da tela de Perfil: os dados vêm sempre do banco,
-     * nunca de um estado local do aplicativo, e o id vem do token — não da
-     * requisição.</p>
+     * Perfil do aluno autenticado: pessoais (somente leitura), contato,
+     * endereço, emergência, plano/situação e foto em Base64.
      */
     @GetMapping("/perfil")
     public AlunoPerfilDTO perfil() {
@@ -146,22 +167,17 @@ public class PortalAlunoController {
     }
 
     /**
-     * Edita os dados pessoais do próprio aluno (nome, e-mail, telefone, CPF e
-     * data de nascimento).
+     * Edita contato, endereço e emergência do próprio aluno.
      *
-     * <p>O DTO de entrada tem apenas esses cinco campos: qualquer outro dado
-     * enviado é descartado, então não existe caminho para alterar cargo,
-     * permissões, plano, situação ou o cadastro de outro aluno — o id do
-     * registro vem sempre do token.</p>
+     * <p>Nome/CPF/nascimento/sexo são protegidos (fora do DTO e ignorados se
+     * enviados). O id vem sempre do token.</p>
      */
     @PutMapping("/perfil")
     public AlunoPerfilDTO atualizarPerfil(@RequestBody(required = false) AtualizarPerfilAlunoDTO dados) {
         if (dados == null) {
-            throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST, "Dados obrigatórios ausentes.", "nome");
+            throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST, "Dados obrigatórios ausentes.", "email");
         }
-        Aluno atualizado = alunoAcessoService.atualizarPerfil(
-                alunoAutenticado(), dados.getNome(), dados.getEmail(), dados.getTelefone(),
-                dados.getCpf(), dados.getDataNascimento());
+        Aluno atualizado = alunoAcessoService.atualizarPerfil(alunoAutenticado(), dados);
         return new AlunoPerfilDTO(atualizado);
     }
 
