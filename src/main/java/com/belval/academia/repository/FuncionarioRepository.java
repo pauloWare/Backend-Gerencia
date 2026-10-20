@@ -30,4 +30,21 @@ public interface FuncionarioRepository extends JpaRepository<Funcionario, Long> 
                 .filter(f -> idIgnorado == null || !Objects.equals(f.getId(), idIgnorado))
                 .anyMatch(f -> digitos.equals(Normalizacao.somenteDigitos(f.getCpf())));
     }
+
+    /**
+     * Existência de telefone considerando apenas os dígitos (reconhece como
+     * duplicados valores gravados com máscara, com ou sem código do país 55).
+     * O {@code idIgnorado} permite que, na edição, o funcionário mantenha o
+     * próprio telefone sem gerar falso conflito consigo mesmo.
+     */
+    default boolean existeTelefone(String telefone, Long idIgnorado) {
+        String normalizado = Normalizacao.telefone(telefone);
+        if (normalizado == null) {
+            return false;
+        }
+        return findAll().stream()
+                .filter(f -> f.getTelefone() != null)
+                .filter(f -> idIgnorado == null || !Objects.equals(f.getId(), idIgnorado))
+                .anyMatch(f -> normalizado.equals(Normalizacao.telefone(f.getTelefone())));
+    }
 }

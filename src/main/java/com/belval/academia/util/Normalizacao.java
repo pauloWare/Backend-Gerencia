@@ -47,4 +47,36 @@ public final class Normalizacao {
         String texto = valor.trim();
         return texto.isEmpty() ? null : texto;
     }
+
+    /**
+     * Telefone: mantém apenas os dígitos (remove espaços, parênteses, traços,
+     * ponto, barra e {@code +}). Quando o valor vem com o código do país 55 e
+     * sobra um número nacional válido (10 ou 11 dígitos), o prefixo é
+     * removido — assim {@code "+55 (11) 98765-4321"} e {@code "11987654321"}
+     * são o MESMO telefone para comparação e gravação.
+     *
+     * <p>Retorna {@code null} quando não há dígitos (evita gravar "" — o banco
+     * aceita vários {@code NULL} no índice único, mas não vários vazios).</p>
+     *
+     * <p>É a MESMA normalização usada pela migração
+     * {@code V5__unicidade_telefone.sql} antes de criar os índices únicos.</p>
+     */
+    public static String telefone(String valor) {
+        if (valor == null) {
+            return null;
+        }
+        String digitos = valor.replaceAll("\\D", "");
+        if (digitos.isEmpty()) {
+            return null;
+        }
+        // 55 + DDD(2) + 8/9 dígitos = 12/13 dígitos no total; um número
+        // nacional nunca tem esse comprimento, então o prefixo é do país.
+        if (digitos.length() >= 12 && digitos.length() <= 13 && digitos.startsWith("55")) {
+            String nacional = digitos.substring(2);
+            if (nacional.length() == 10 || nacional.length() == 11) {
+                return nacional;
+            }
+        }
+        return digitos;
+    }
 }

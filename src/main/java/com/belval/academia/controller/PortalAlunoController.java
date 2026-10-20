@@ -10,7 +10,10 @@ import com.belval.academia.dto.MensalidadeAlunoDTO;
 import com.belval.academia.exception.ErroDeRegraDeNegocio;
 import com.belval.academia.model.Aluno;
 import com.belval.academia.model.Mensalidade;
+import com.belval.academia.model.Receita;
 import com.belval.academia.repository.AlunoRepository;
+import com.belval.academia.repository.MensalidadeRepository;
+import com.belval.academia.repository.ReceitaRepository;
 import com.belval.academia.security.TokenService;
 import com.belval.academia.security.UsuarioAutenticado;
 import com.belval.academia.service.AlunoAcessoService;
@@ -20,6 +23,7 @@ import com.belval.academia.service.SituacaoFinanceiraService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -41,17 +45,20 @@ import java.util.Optional;
  * de um id/CPF enviado pelo aplicativo: assim um aluno não consegue ler a
  * frequência ou as mensalidades de outro alterando parâmetros da requisição.</p>
  *
- * <p>Sobre pagamento: o backend NÃO possui integração com provedor de pagamento
- * (o fluxo {@code POST /api/mensalidade/{id}/pagar} é o registro manual/acadêmico
- * feito pelo staff na recepção). Por isso este portal apenas CONSULTA a situação
- * financeira e informa que o pagamento deve ser feito na recepção — não existe
- * e não é simulado nenhum pagamento online.</p>
+ * <p>Sobre pagamento: o projeto NÃO usa gateway real — para o TCC existe uma
+ * <b>simulação</b> (POST /api/portal/mensalidades/{id}/pagar), que o próprio aluno
+ * dispara pelo app e que marca a mensalidade como PAGA sem nenhuma cobrança de
+ * verdade (mesmo efeito do registro manual da recepção, POST /api/mensalidade/{id}/pagar).
+ * O GET /mensalidades devolve {@code pagamentoOnlineDisponivel = true} apenas para
+ * o app exibir o botão "Pagar"; nenhuma transação é processada.</p>
  */
 @RestController
 @RequestMapping("/api/portal")
 public class PortalAlunoController {
 
     private final AlunoRepository alunoRepository;
+    private final MensalidadeRepository mensalidadeRepository;
+    private final ReceitaRepository receitaRepository;
     private final TokenService tokenService;
     private final FrequenciaService frequenciaService;
     private final SituacaoFinanceiraService situacaoFinanceiraService;
@@ -59,12 +66,16 @@ public class PortalAlunoController {
     private final AtivacaoAlunoService ativacaoService;
 
     public PortalAlunoController(AlunoRepository alunoRepository,
+                                 MensalidadeRepository mensalidadeRepository,
+                                 ReceitaRepository receitaRepository,
                                  TokenService tokenService,
                                  FrequenciaService frequenciaService,
                                  SituacaoFinanceiraService situacaoFinanceiraService,
                                  AlunoAcessoService alunoAcessoService,
                                  AtivacaoAlunoService ativacaoService) {
         this.alunoRepository = alunoRepository;
+        this.mensalidadeRepository = mensalidadeRepository;
+        this.receitaRepository = receitaRepository;
         this.tokenService = tokenService;
         this.frequenciaService = frequenciaService;
         this.situacaoFinanceiraService = situacaoFinanceiraService;
@@ -132,12 +143,74 @@ public class PortalAlunoController {
 
     /**
      * Situação financeira do aluno autenticado: lista das próprias mensalidades,
-     * situação consolidada (EM_DIA / ATRASADA / SEM_MENSALIDADE) e o aviso de que
-     * o pagamento online não está disponível (deve ser feito na recepção).
+     * situação consolidada (EM_DIA / ATRASADA / SEM_MENSALIDADE) e a flag que
+     * libera o botão "Pagar" do app — pagamento SIMULADO (TCC), sem cobrança real.
      */
     @GetMapping("/mensalidades")
     public Map<String, Object> mensalidades() {
+        return respostaMensalidades(alunoAutenticado());
+    }
+
+    /**
+     * SIMULAÇÃO de pagamento (projeto de TCC): marca uma mensalidade ABERTA do
+     * PRÓPRIO aluno como PAGA, com data de hoje, e registra a Receita
+     * correspondente — mesmo efeito do registro manual da recepção
+     * ({@code POST /api/mensalidade/{id}/pagar}), só que autorizado pela sessão
+     * do aluno. Nenhuma cobrança real acontece.
+     *
+     * <p>Regras: o id vem do caminho e a mensalidade precisa pertencer ao aluno
+     * do token (caso contrário 404, sem revelar a existência de dados alheios);
+     * mensalidade já quitada responde 409. A resposta é o MESMO mapa do GET,
+     * com a situação já recalculada, para o app só recarregar a tela.</p>
+     */
+    @PostMapping("/mensalidades/{id}/pagar")
+    public Map<String, Object> pagar(@PathVariable Long id) {
         Long alunoId = alunoAutenticado();
+
+        Mensalidade mensalidade = mensalidadeRepository.findById(id)
+                .filter(m -> m.getAluno() != null && alunoId.equals(m.getAluno().getId()))
+                .orElseThrow(() -> new ErroDeRegraDeNegocio(HttpStatus.NOT_FOUND,
+                        "Mensalidade não encontrada."));
+
+        if (SituacaoFinanceiraService.estaPaga(mensalidade)) {
+            throw new ErroDeRegraDeNegocio(HttpStatus.CONFLICT,
+                    "Esta mensalidade já está paga.");
+        }
+
+        LocalDate hoje = frequenciaService.hoje();
+        mensalidade.setStatus(SituacaoFinanceiraService.PAGA);
+        mensalidade.setDataPagamento(hoje);
+        mensalidade.setFormaPagamento("PIX");
+        mensalidade.setUsuarioResponsavel("ALUNO_APP");
+        mensalidadeRepository.save(mensalidade);
+
+        registrarReceita(mensalidade, hoje);
+
+        return respostaMensalidades(alunoId);
+    }
+
+    /**
+     * Cria (ou atualiza, sem duplicar) a Receita que representa o pagamento,
+     * mantendo a dashboard financeira do sistema coerente com a simulação —
+     * mesma regra do fluxo administrativo de {@code MensalidadeController}.
+     */
+    private void registrarReceita(Mensalidade mensalidade, LocalDate hoje) {
+        Receita receita = receitaRepository.findByMensalidadeId(mensalidade.getId())
+                .stream()
+                .findFirst()
+                .orElseGet(Receita::new);
+        receita.setTipo("MENSALIDADE");
+        receita.setDescricao("Mensalidade - "
+                + (mensalidade.getAluno() != null ? mensalidade.getAluno().getNome() : "Aluno"));
+        receita.setValor(mensalidade.getValor());
+        receita.setData(hoje);
+        receita.setAluno(mensalidade.getAluno());
+        receita.setMensalidadeId(mensalidade.getId());
+        receitaRepository.save(receita);
+    }
+
+    /** Mapa de resposta do portal (GET e o POST de pagamento simulado). */
+    private Map<String, Object> respostaMensalidades(Long alunoId) {
         LocalDate hoje = frequenciaService.hoje();
 
         List<Mensalidade> lista = situacaoFinanceiraService.listar(alunoId);
@@ -148,11 +221,11 @@ public class PortalAlunoController {
         Map<String, Object> resposta = new HashMap<>();
         resposta.put("situacao", situacaoFinanceiraService.situacao(alunoId, hoje));
         resposta.put("hoje", hoje);
-        // Sem integração com meio de pagamento: o app NÃO deve oferecer/comunicar
-        // um pagamento online como se fosse real.
-        resposta.put("pagamentoOnlineDisponivel", false);
+        // Flag só para o app exibir o botão "Pagar" — o pagamento é SIMULADO
+        // (TCC): nenhuma transação é processada em lugar nenhum.
+        resposta.put("pagamentoOnlineDisponivel", true);
         resposta.put("mensagemPagamento",
-                "O pagamento online ainda não está disponível. Regularize sua mensalidade na recepção da academia.");
+                "Pagamento simulado para fins de demonstração (TCC): nenhuma cobrança real é processada.");
         resposta.put("mensalidades", mensalidades);
         return resposta;
     }

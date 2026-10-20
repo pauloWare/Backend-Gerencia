@@ -8,6 +8,9 @@ import java.time.LocalDate;
 @Data
 // Mesma trava do aluno: CPF único dentro da tabela (a unicidade cruzada
 // aluno x funcionário para valores novos é validada na aplicação).
+// Telefone: índice único no banco criado por V5__unicidade_telefone.sql /
+// schema.sql (filtrado WHERE telefone IS NOT NULL — não declarado aqui porque
+// o JPA não suporta índice filtrado; ver comentário completo em Aluno).
 @Table(indexes = @Index(name = "UX_funcionario_cpf", columnList = "cpf", unique = true))
 public class Funcionario {
     @Id

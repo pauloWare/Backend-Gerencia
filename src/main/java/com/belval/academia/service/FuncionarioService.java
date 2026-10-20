@@ -145,6 +145,9 @@ public class FuncionarioService {
         // Valida o CPF ANTES de sobrescrever o valor atual: na edição, o próprio
         // funcionário pode manter o CPF que já possui.
         unicidade.validarCpfFuncionario(dto.getCpf(), idAtual, f.getCpf());
+        // Telefone: mesma lógica — valida ANTES de sobrescrever e considerando a
+        // conta vinculada (que espelha o mesmo número por ser a mesma identidade).
+        unicidade.validarTelefoneFuncionario(dto.getTelefone(), idAtual, f.getTelefone(), f.getUsuarioId());
 
         f.setNome(nome);
         f.setCargo(cargo.toUpperCase());
@@ -157,7 +160,7 @@ public class FuncionarioService {
         f.setSalario(dto.getSalario());
         f.setCpf(Normalizacao.somenteDigitos(dto.getCpf()));
         f.setDataNascimento(dto.getDataNascimento());
-        f.setTelefone(Normalizacao.texto(dto.getTelefone()));
+        f.setTelefone(Normalizacao.telefone(dto.getTelefone()));
         f.setEmail(emailContato);
         f.setCep(Normalizacao.somenteDigitos(dto.getCep()));
         f.setLogradouro(Normalizacao.texto(dto.getLogradouro()));

@@ -111,13 +111,14 @@ public class UsuarioController {
             throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST, "Cargo inválido.", "cargo");
         }
         unicidade.validarEmailAcesso(email, null);
+        unicidade.validarTelefoneUsuario(dados.getTelefone());
 
         Usuario novo = new Usuario();
         novo.setNome(nome);
         novo.setEmail(email);
         novo.setSenha(autenticacaoService.codificar(senha));
         novo.setCargo(cargo.toUpperCase());
-        novo.setTelefone(Normalizacao.texto(dados.getTelefone()));
+        novo.setTelefone(Normalizacao.telefone(dados.getTelefone()));
         novo.setSexo(Normalizacao.texto(dados.getSexo()));
         novo.setDataNascimento(Normalizacao.texto(dados.getDataNascimento()));
         novo.setStatus("user");

@@ -40,6 +40,8 @@ class PortalAlunoTest extends TesteBase {
     private MensalidadeRepository mensalidadeRepository;
     @Autowired
     private FrequenciaRepository frequenciaRepository;
+    @Autowired
+    private com.belval.academia.repository.ReceitaRepository receitaRepository;
 
     private static final LocalDate NASCIMENTO = LocalDate.of(1990, 1, 1);
     private static final String SENHA_ALUNO = "AlunoSenha123";
@@ -61,7 +63,7 @@ class PortalAlunoTest extends TesteBase {
         return alunoRepository.save(aluno);
     }
 
-    private void criarMensalidade(Aluno aluno, String status, LocalDate vencimento) {
+    private Mensalidade criarMensalidade(Aluno aluno, String status, LocalDate vencimento) {
         Mensalidade m = new Mensalidade();
         m.setAluno(aluno);
         m.setStatus(status);
@@ -70,7 +72,7 @@ class PortalAlunoTest extends TesteBase {
         if ("PAGA".equals(status)) {
             m.setDataPagamento(vencimento);
         }
-        mensalidadeRepository.save(m);
+        return mensalidadeRepository.save(m);
     }
 
     /** Login de aluno pelo endpoint do portal (e-mail + senha). */
@@ -430,7 +432,7 @@ class PortalAlunoTest extends TesteBase {
     // ===================== Mensalidade do aluno =====================
 
     @Test
-    void mensalidadeQuitadaNaoOferecePagamentoEInformaEmDia() throws Exception {
+    void mensalidadeQuitadaApareceComoPagaEComPagamentoDisponivel() throws Exception {
         Aluno aluno = criarAluno("ATIVO");
         criarMensalidade(aluno, "PAGA", LocalDate.now().minusDays(20));
         String tokenAluno = tokenDoAluno(aluno);
@@ -439,14 +441,14 @@ class PortalAlunoTest extends TesteBase {
                         .header("Authorization", bearer(tokenAluno)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.situacao").value("EM_DIA"))
-                // Sem integração de pagamento: nunca expor uma ação de pagar/quitar.
-                .andExpect(jsonPath("$.pagamentoOnlineDisponivel").value(false))
+                // Simulação de pagamento (TCC): o app pode exibir o botão "Pagar".
+                .andExpect(jsonPath("$.pagamentoOnlineDisponivel").value(true))
                 .andExpect(jsonPath("$.mensalidades[0].situacao").value("PAGA"))
                 .andExpect(jsonPath("$.mensalidades[0].valor").value(120.0));
     }
 
     @Test
-    void mensalidadeAtrasadaInformaSituacaoEQueOPagamentoEhNaRecepcao() throws Exception {
+    void mensalidadeAtrasadaInformaSituacaoEMensagemDeSimulacao() throws Exception {
         Aluno aluno = criarAluno("ATIVO");
         criarMensalidade(aluno, "PENDENTE", LocalDate.now().minusDays(15));
         String tokenAluno = tokenDoAluno(aluno);
@@ -455,10 +457,63 @@ class PortalAlunoTest extends TesteBase {
                         .header("Authorization", bearer(tokenAluno)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.situacao").value("ATRASADA"))
-                .andExpect(jsonPath("$.pagamentoOnlineDisponivel").value(false))
+                .andExpect(jsonPath("$.pagamentoOnlineDisponivel").value(true))
+                // A mensagem deixa claro que não há cobrança real (TCC).
                 .andExpect(jsonPath("$.mensagemPagamento").value(
-                        org.hamcrest.Matchers.containsString("recepção")))
+                        org.hamcrest.Matchers.containsString("simulado")))
                 .andExpect(jsonPath("$.mensalidades[0].situacao").value("ATRASADA"));
+    }
+
+    // ===================== Pagamento simulado (TCC) =========================
+
+    @Test
+    void alunoPagaMensalidadeAbertaPorSimulacaoEElaConstaComoPaga() throws Exception {
+        Aluno aluno = criarAluno("ATIVO");
+        Mensalidade mensalidade = criarMensalidade(aluno, "PENDENTE", LocalDate.now().minusDays(15));
+        String tokenAluno = tokenDoAluno(aluno);
+
+        mockMvc.perform(post("/api/portal/mensalidades/" + mensalidade.getId() + "/pagar")
+                        .header("Authorization", bearer(tokenAluno)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.situacao").value("EM_DIA"))
+                .andExpect(jsonPath("$.mensalidades[0].situacao").value("PAGA"))
+                .andExpect(jsonPath("$.mensalidades[0].dataPagamento").value(LocalDate.now().toString()))
+                .andExpect(jsonPath("$.mensalidades[0].formaPagamento").value("PIX"));
+
+        // Persistência: status/data gravados e a Receita da dashboard criada.
+        Mensalidade salva = mensalidadeRepository.findById(mensalidade.getId()).orElseThrow();
+        assertThat(salva.getStatus()).isEqualTo("PAGA");
+        assertThat(salva.getDataPagamento()).isEqualTo(LocalDate.now());
+        assertThat(receitaRepository.findByMensalidadeId(mensalidade.getId())).hasSize(1);
+    }
+
+    @Test
+    void alunoNaoConseguePagarMensalidadeDeOutroAluno() throws Exception {
+        Aluno dono = criarAluno("ATIVO");
+        Mensalidade doDono = criarMensalidade(dono, "PENDENTE", LocalDate.now().minusDays(5));
+
+        Aluno outro = criarAluno("ATIVO");
+        String tokenOutro = tokenDoAluno(outro);
+
+        // 404 (não 403): o app não deve saber que aquela mensalidade existe.
+        mockMvc.perform(post("/api/portal/mensalidades/" + doDono.getId() + "/pagar")
+                        .header("Authorization", bearer(tokenOutro)))
+                .andExpect(status().isNotFound());
+
+        assertThat(mensalidadeRepository.findById(doDono.getId()).orElseThrow().getStatus())
+                .isEqualTo("PENDENTE");
+    }
+
+    @Test
+    void pagamentoDeMensalidadeJaPagaEhRecusado() throws Exception {
+        Aluno aluno = criarAluno("ATIVO");
+        Mensalidade paga = criarMensalidade(aluno, "PAGA", LocalDate.now().minusDays(10));
+        String tokenAluno = tokenDoAluno(aluno);
+
+        mockMvc.perform(post("/api/portal/mensalidades/" + paga.getId() + "/pagar")
+                        .header("Authorization", bearer(tokenAluno)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.erro").value("Esta mensalidade já está paga."));
     }
 
     // ===================== Autenticação e autorização =====================
@@ -467,6 +522,7 @@ class PortalAlunoTest extends TesteBase {
     void portalSemTokenEhNaoAutorizado() throws Exception {
         mockMvc.perform(get("/api/portal/frequencia")).andExpect(status().isUnauthorized());
         mockMvc.perform(get("/api/portal/mensalidades")).andExpect(status().isUnauthorized());
+        mockMvc.perform(post("/api/portal/mensalidades/1/pagar")).andExpect(status().isUnauthorized());
     }
 
     @Test

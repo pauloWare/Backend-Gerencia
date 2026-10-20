@@ -5,6 +5,9 @@ import lombok.Data;
 
 @Entity
 @Data // Use o Lombok para não precisar escrever getters/setters
+// Telefone: índice único no banco criado por V5__unicidade_telefone.sql /
+// schema.sql (filtrado WHERE telefone IS NOT NULL — não declarado aqui porque
+// o JPA não suporta índice filtrado; ver comentário completo em Aluno).
 @Table(indexes = @Index(name = "UX_usuario_email", columnList = "email", unique = true))
 public class Usuario {
     @Id

@@ -25,6 +25,16 @@ import org.springframework.stereotype.Service;
  *       novos. Registros antigos que já estejam repetidos entre as tabelas não
  *       são bloqueados na edição (o valor permanece o mesmo), para não travar
  *       dados legados.</li>
+ *   <li><b>Telefone</b>: mesmo escopo do CPF. Índice único POR TABELA no banco
+ *       ({@code UX_aluno_telefone}, {@code UX_funcionario_telefone},
+ *       {@code UX_usuario_telefone} — scripts V5/schema.sql) e comparação
+ *       <b>entre</b> cadastros na aplicação para valores novos/alterados. O par
+ *       funcionário ↔ conta de acesso vinculada ({@code funcionario.usuario_id})
+ *       é a MESMA identidade: a conta espelha o telefone do funcionário por
+ *       design e por isso a validação roda ANTES do espelhamento (nunca o
+ *       bloqueia). {@code aluno.contato_emergencia_telefone} fica fora: é o
+ *       telefone de terceiros e pode legitimamente coincidir com o de outro
+ *       cadastro.</li>
  * </ul>
  */
 @Service
@@ -109,5 +119,92 @@ public class UnicidadeCadastroService {
                             : "Este CPF já está cadastrado como aluno.",
                     "cpf");
         }
+    }
+
+    // ========================================================================
+    // TELEFONE
+    // ========================================================================
+    // Comparação SEMPRE pelo número normalizado (só dígitos, sem código do
+    // país 55) — Normalizacao.telefone é a mesma usada na gravação e na
+    // migração V5, então "(11) 98765-4321", "+5511987654321" e "11987654321"
+    // são o mesmo valor. Telefone opcional: nulo/vazio não valida nada.
+
+    /**
+     * Valida a unicidade do telefone de um aluno (cadastro e edição).
+     *
+     * @param telefone           telefone informado (com ou sem máscara)
+     * @param idAtual            id do aluno em edição ({@code null} no cadastro)
+     * @param telefoneArmazenado telefone atualmente gravado (para permitir manter o próprio valor)
+     */
+    public void validarTelefoneAluno(String telefone, Long idAtual, String telefoneArmazenado) {
+        String normalizado = Normalizacao.telefone(telefone);
+        if (normalizado == null) {
+            return;
+        }
+        if (alunoRepository.existeTelefone(normalizado, idAtual)) {
+            throw conflitoDeTelefone("Já existe um aluno cadastrado com este telefone.");
+        }
+        if (!valorDeTelefoneAlterado(normalizado, idAtual, telefoneArmazenado)) {
+            return;
+        }
+        if (funcionarioRepository.existeTelefone(normalizado, null)) {
+            throw conflitoDeTelefone("Este telefone já está cadastrado como funcionário.");
+        }
+        if (usuarioRepository.existeTelefone(normalizado, null)) {
+            throw conflitoDeTelefone("Este telefone já está em uso por uma conta da equipe.");
+        }
+    }
+
+    /**
+     * Idem para funcionário.
+     *
+     * @param idContaVinculada id da conta de acesso vinculada (espelha o mesmo
+     *                         telefone por ser a mesma identidade — ignorada na
+     *                         checagem para nunca gerar falso conflito)
+     */
+    public void validarTelefoneFuncionario(String telefone, Long idAtual, String telefoneArmazenado,
+                                           Long idContaVinculada) {
+        String normalizado = Normalizacao.telefone(telefone);
+        if (normalizado == null) {
+            return;
+        }
+        if (funcionarioRepository.existeTelefone(normalizado, idAtual)) {
+            throw conflitoDeTelefone("Já existe um funcionário cadastrado com este telefone.");
+        }
+        if (!valorDeTelefoneAlterado(normalizado, idAtual, telefoneArmazenado)) {
+            return;
+        }
+        if (alunoRepository.existeTelefone(normalizado, null)) {
+            throw conflitoDeTelefone("Este telefone já está cadastrado como aluno.");
+        }
+        if (usuarioRepository.existeTelefone(normalizado, idContaVinculada)) {
+            throw conflitoDeTelefone("Este telefone já está em uso por uma conta da equipe.");
+        }
+    }
+
+    /** Valida a unicidade do telefone de uma conta de acesso da equipe (criação). */
+    public void validarTelefoneUsuario(String telefone) {
+        String normalizado = Normalizacao.telefone(telefone);
+        if (normalizado == null) {
+            return;
+        }
+        if (usuarioRepository.existeTelefone(normalizado, null)) {
+            throw conflitoDeTelefone("Já existe uma conta de acesso com este telefone.");
+        }
+        if (alunoRepository.existeTelefone(normalizado, null)) {
+            throw conflitoDeTelefone("Este telefone já está em uso por um cadastro de aluno.");
+        }
+        if (funcionarioRepository.existeTelefone(normalizado, null)) {
+            throw conflitoDeTelefone("Este telefone já está em uso por um cadastro de funcionário.");
+        }
+    }
+
+    /** Entre tabelas, só bloqueia valores novos/alterados (mesmo critério do CPF). */
+    private boolean valorDeTelefoneAlterado(String normalizado, Long idAtual, String telefoneArmazenado) {
+        return idAtual == null || !normalizado.equals(Normalizacao.telefone(telefoneArmazenado));
+    }
+
+    private ErroDeRegraDeNegocio conflitoDeTelefone(String mensagem) {
+        return new ErroDeRegraDeNegocio(HttpStatus.CONFLICT, mensagem, "telefone");
     }
 }

@@ -14,6 +14,14 @@ import java.time.LocalDate;
 // login da equipe (usuario.email) tem. A unicidade do e-mail de LOGIN do aluno
 // é garantida pela aplicação (AlunoAcessoService), que só considera os alunos
 // que já possuem senha de acesso definida.
+//
+// TELEFONE: a unicidade também é garantida por índice único, mas o índice
+// precisa ser FILTRADO (WHERE telefone IS NOT NULL) para o SQL Server aceitar
+// vários NULLs — o JPA não consegue expressar índice filtrado, então ele NÃO é
+// declarado aqui: é criado por db/migration/{sqlserver,postgres}/
+// V5__unicidade_telefone.sql (ambiente real) e pelo src/test/resources/
+// schema.sql (H2 dos testes). A normalização (só dígitos) está em
+// Normalizacao.telefone — mesma regra do Bloco 2 da migração.
 @Table(indexes = @Index(name = "UX_aluno_cpf", columnList = "cpf", unique = true))
 public class Aluno {
     @Id

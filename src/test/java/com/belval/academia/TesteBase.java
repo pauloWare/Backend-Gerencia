@@ -110,6 +110,22 @@ public abstract class TesteBase {
         return comPrimeiro + digitoVerificador(comPrimeiro, 11);
     }
 
+    // ===================== Telefone de teste =====================
+
+    /**
+     * Sequência estática: telefones sempre diferentes dentro da mesma JVM,
+     * sem risco de colidir no índice único compartilhado por todos os testes.
+     * 11 dígitos começando por 9 — nunca cai na regra de remoção do código
+     * do país 55 (que só se aplica a 12/13 dígitos).
+     */
+    private static final java.util.concurrent.atomic.AtomicLong SEQUENCIA_TELEFONE =
+            new java.util.concurrent.atomic.AtomicLong(91000000000L);
+
+    /** Telefone único por chamada (11 dígitos), para os testes não colidirem. */
+    protected static String telefoneUnico() {
+        return Long.toString(SEQUENCIA_TELEFONE.incrementAndGet());
+    }
+
     private static int digitoVerificador(String numeros, int pesoInicial) {
         int soma = 0;
         for (int i = 0; i < numeros.length(); i++) {

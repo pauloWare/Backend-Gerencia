@@ -76,14 +76,17 @@ public class AlunoAcessoService {
     private final AlunoRepository alunoRepository;
     private final UsuarioRepository usuarioRepository;
     private final PasswordEncoder passwordEncoder;
+    private final UnicidadeCadastroService unicidade;
 
     public AlunoAcessoService(AlunoRepository alunoRepository,
                               UsuarioRepository usuarioRepository,
                               PasswordEncoder passwordEncoder,
+                              UnicidadeCadastroService unicidade,
                               @Value("${app.upload.foto-max-bytes:1000000}") int fotoMaxBytes) {
         this.alunoRepository = alunoRepository;
         this.usuarioRepository = usuarioRepository;
         this.passwordEncoder = passwordEncoder;
+        this.unicidade = unicidade;
         this.fotoMaxBytes = fotoMaxBytes;
     }
 
@@ -212,8 +215,12 @@ public class AlunoAcessoService {
             aluno.setEmail(email);
         }
         if (dados.getTelefone() != null) {
-            aluno.setTelefone(validarTelefone(dados.getTelefone(), "telefone",
-                    "O telefone deve ter no máximo 30 caracteres.", "Informe um telefone válido."));
+            String telefone = validarTelefone(dados.getTelefone(), "telefone",
+                    "O telefone deve ter no máximo 30 caracteres.", "Informe um telefone válido.");
+            // Unicidade: o aluno não pode passar a usar o telefone de outra
+            // pessoa (409); manter o próprio número nunca gera conflito.
+            unicidade.validarTelefoneAluno(telefone, alunoId, aluno.getTelefone());
+            aluno.setTelefone(Normalizacao.telefone(telefone));
         }
     }
 

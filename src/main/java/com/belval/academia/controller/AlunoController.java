@@ -59,7 +59,7 @@ public class AlunoController {
      */
     @PostMapping
     public ResponseEntity<Aluno> criar(@RequestBody Aluno aluno) {
-        prepararDados(aluno, null, null);
+        prepararDados(aluno, null, null, null);
         // A senha de acesso e a foto têm rotas próprias e protegidas; um
         // cadastro nunca as define por engano (a senha é definida pelo aluno
         // em POST /api/portal/ativar-conta com o código desta resposta).
@@ -106,7 +106,7 @@ public class AlunoController {
                     // e o portal do aluno), preservando o que já existia.
                     aluno.setSenha(existing.getSenha());
                     aluno.setFotoPerfilBase64(existing.getFotoPerfilBase64());
-                    prepararDados(aluno, id, existing.getCpf());
+                    prepararDados(aluno, id, existing.getCpf(), existing.getTelefone());
                     aluno.setId(id);
                     return ResponseEntity.ok(alunoRepository.save(aluno));
                 })
@@ -188,6 +188,10 @@ public class AlunoController {
         } else {
             resposta.put("contaJaAtiva", false);
             resposta.put("codigoAtivacao", gerado.codigo());
+            // O registro anterior foi substituído (índice único por aluno),
+            // portanto o código antigo deixou de ser válido. A mensagem não
+            // contém o código — ele só existe no corpo desta resposta.
+            resposta.put("mensagem", "Novo código de ativação gerado. O código anterior foi invalidado.");
         }
         return ResponseEntity.ok(resposta);
     }
@@ -237,9 +241,12 @@ public class AlunoController {
      * <p>CPF: validado (dígitos verificadores) e gravado apenas com dígitos,
      * impedindo que "123.456.789-01" e "12345678901" virem dois cadastros.
      * E-mail de contato: espaços removidos e minúsculas (não é identidade de
-     * login, por isso pode se repetir entre alunos — ex.: mesma família).</p>
+     * login, por isso pode se repetir entre alunos — ex.: mesma família).
+     * Telefone: unicidade validada (409) e gravado só com dígitos — a mesma
+     * normalização da migração V5, para o índice único do banco comparar
+     * valores canônicos ("(11) 98765-4321" == "11987654321").</p>
      */
-    private void prepararDados(Aluno aluno, Long idAtual, String cpfArmazenado) {
+    private void prepararDados(Aluno aluno, Long idAtual, String cpfArmazenado, String telefoneArmazenado) {
         if (aluno == null) {
             throw new ErroDeRegraDeNegocio(HttpStatus.BAD_REQUEST, "Dados obrigatórios ausentes.", "nome");
         }
@@ -253,11 +260,12 @@ public class AlunoController {
         }
 
         unicidade.validarCpfAluno(aluno.getCpf(), idAtual, cpfArmazenado);
+        unicidade.validarTelefoneAluno(aluno.getTelefone(), idAtual, telefoneArmazenado);
 
         aluno.setNome(nome);
         aluno.setEmail(email);
         aluno.setCpf(Normalizacao.somenteDigitos(aluno.getCpf()));
-        aluno.setTelefone(Normalizacao.texto(aluno.getTelefone()));
+        aluno.setTelefone(Normalizacao.telefone(aluno.getTelefone()));
         aluno.setPlano(Normalizacao.texto(aluno.getPlano()));
         aluno.setCep(Normalizacao.somenteDigitos(aluno.getCep()));
     }

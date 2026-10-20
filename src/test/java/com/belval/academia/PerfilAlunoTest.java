@@ -49,7 +49,9 @@ class PerfilAlunoTest extends TesteBase {
         aluno.setDataNascimento(LocalDate.of(1990, 5, 20));
         aluno.setSexo("M");
         aluno.setEmail(emailUnico("perfil"));
-        aluno.setTelefone("11987654321");
+        // Telefone único por teste: o índice ux_aluno_telefone (schema.sql)
+        // impediria dois alunos com o mesmo número no banco compartilhado.
+        aluno.setTelefone(telefoneUnico());
         aluno.setCep("01310100");
         aluno.setLogradouro("Av. Paulista");
         aluno.setNumero("1000");
@@ -84,7 +86,7 @@ class PerfilAlunoTest extends TesteBase {
                 .andExpect(jsonPath("$.id").value(aluno.getId()))
                 .andExpect(jsonPath("$.nome").value("Aluno Perfil"))
                 .andExpect(jsonPath("$.email").value(aluno.getEmail()))
-                .andExpect(jsonPath("$.telefone").value("11987654321"))
+                .andExpect(jsonPath("$.telefone").value(aluno.getTelefone()))
                 .andExpect(jsonPath("$.plano").value("Mensal"))
                 .andExpect(jsonPath("$.situacao").value("ATIVO"))
                 .andExpect(jsonPath("$.dataNascimento").value("1990-05-20"))
@@ -314,7 +316,7 @@ class PerfilAlunoTest extends TesteBase {
 
         Aluno aposParcial = alunoRepository.findById(aluno.getId()).orElseThrow();
         assertThat(aposParcial.getEmail()).isEqualTo(emailParcial);
-        assertThat(aposParcial.getTelefone()).isEqualTo("11987654321");
+        assertThat(aposParcial.getTelefone()).isEqualTo(aluno.getTelefone());
         assertThat(aposParcial.getContatoEmergenciaNome()).isEqualTo("Mae do Aluno");
 
         // String vazia limpa um campo opcional (complemento)...
@@ -390,7 +392,7 @@ class PerfilAlunoTest extends TesteBase {
         Aluno b = alunoRepository.findById(alunoB.getId()).orElseThrow();
         assertThat(b.getNome()).isEqualTo("Aluno Perfil");
         assertThat(b.getEmail()).isEqualTo(emailB);
-        assertThat(b.getTelefone()).isEqualTo("11987654321");
+        assertThat(b.getTelefone()).isEqualTo(alunoB.getTelefone());
         assertThat(b.getSituacao()).isEqualTo("ATIVO");
         assertThat(b.getPlano()).isEqualTo("Mensal");
         assertThat(b.getCpf()).isEqualTo(alunoB.getCpf());
@@ -426,7 +428,7 @@ class PerfilAlunoTest extends TesteBase {
     }
 
     @Test
-    void telefoneFormatadoEhPreservadoComoEsta() throws Exception {
+    void telefoneFormatadoEhNormalizadoParaSoDigitos() throws Exception {
         Aluno aluno = criarAlunoComSenha();
 
         mockMvc.perform(put("/api/portal/perfil")
@@ -437,12 +439,14 @@ class PerfilAlunoTest extends TesteBase {
                                 "email", aluno.getEmail(),
                                 "telefone", "(11) 98765-4321"))))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.telefone").value("(11) 98765-4321"));
+                .andExpect(jsonPath("$.telefone").value("11987654321"));
 
-        // Compatibilidade: o valor é apenas aparado, sem reformatar dados já
-        // existentes (o banco convive com "11987654321" e com números formatados).
+        // Normalização para unicidade: a gravação usa só os dígitos (mesma regra
+        // da migração V5 e do índice único no banco), então "(11) 98765-4321" e
+        // "11987654321" são o MESMO telefone — a comparação não depende da
+        // máscara enviada pelo formulário.
         assertThat(alunoRepository.findById(aluno.getId()).orElseThrow().getTelefone())
-                .isEqualTo("(11) 98765-4321");
+                .isEqualTo("11987654321");
     }
 
     @Test

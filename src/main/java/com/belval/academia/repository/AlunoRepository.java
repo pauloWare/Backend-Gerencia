@@ -70,6 +70,23 @@ public interface AlunoRepository extends JpaRepository<Aluno, Long> {
     }
 
     /**
+     * Existência de telefone considerando apenas os dígitos (reconhece como
+     * duplicados valores gravados com máscara, com ou sem código do país 55).
+     * O {@code idIgnorado} permite que, na edição, o aluno mantenha o próprio
+     * telefone sem gerar falso conflito consigo mesmo.
+     */
+    default boolean existeTelefone(String telefone, Long idIgnorado) {
+        String normalizado = Normalizacao.telefone(telefone);
+        if (normalizado == null) {
+            return false;
+        }
+        return findAll().stream()
+                .filter(a -> a.getTelefone() != null)
+                .filter(a -> idIgnorado == null || !Objects.equals(a.getId(), idIgnorado))
+                .anyMatch(a -> normalizado.equals(Normalizacao.telefone(a.getTelefone())));
+    }
+
+    /**
      * Localiza um aluno pelo CPF aceitando o valor com ou sem máscara.
      * Primeiro tenta a busca exata (findByCpf); se não encontrar, compara apenas os
      * dígitos, pois o CPF pode estar gravado formatado (ex.: "123.456.789-01").
